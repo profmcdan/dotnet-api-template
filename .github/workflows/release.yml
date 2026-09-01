@@ -3,8 +3,20 @@ name: release
 # Tag a commit `v1.2.3` and this publishes ProfmcdanDotnetApiTemplate.Cli and
 # ProfmcdanDotnetApiTemplate.Templates to nuget.org, then opens a GitHub release.
 #
-# One-time setup: add a repository secret NUGET_API_KEY from
-# https://www.nuget.org/account/apikeys (scope it to the two package IDs).
+# Publishing uses nuget.org Trusted Publishing (OIDC): GitHub mints a short-lived, signed token
+# for this workflow, nuget.org validates it against a policy you registered, and hands back an
+# API key that lives for one hour. No long-lived key is stored anywhere.
+#
+# PREREQUISITES
+#   1. A Trusted Publishing policy on nuget.org (your username menu -> Trusted Publishing) with:
+#        Repository Owner  profmcdan
+#        Repository        dotnet-api-template
+#        Workflow File     release.yml          <- file name only, no path
+#        Environment       (leave empty unless you add one below)
+#   2. A repository variable NUGET_USER holding your nuget.org profile name (not your email).
+#      Settings -> Secrets and variables -> Actions -> Variables.
+#
+# Without these the first step fails with a clear message and nothing is published.
 
 on:
   push:
@@ -22,7 +34,8 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: write   # create the GitHub release
+  id-token: write   # mint the OIDC token that nuget.org exchanges for a short-lived key
 
 env:
   DOTNET_NOLOGO: true
@@ -35,6 +48,33 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # Checked first so a misconfiguration costs seconds rather than a full test-pack-smoke
+      # cycle. There is no API key to check any more - only who we publish as.
+      - name: Check the publisher identity
+        if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::NUGET_USER is not configured, so the OIDC token exchange would fail."
+            {
+              echo "### Missing NUGET_USER"
+              echo ""
+              echo "Nothing was published. Trusted Publishing needs to know which nuget.org"
+              echo "account to publish as."
+              echo ""
+              echo "1. Add a repository **variable** named \`NUGET_USER\` set to your nuget.org"
+              echo "   profile name — not your email address."
+              echo "   (Settings → Secrets and variables → Actions → Variables)"
+              echo "2. Confirm the Trusted Publishing policy on nuget.org matches this repository"
+              echo "   and names \`release.yml\` as the workflow file."
+              echo "3. Re-run this workflow — the tag does not need recreating."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "Publishing as nuget.org user '$NUGET_USER'."
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0    # Source Link embeds the commit; a shallow clone breaks it.
@@ -129,13 +169,40 @@ jobs:
           path: artifacts/*
           retention-days: 30
 
+      # Immediately before the push: the key nuget.org issues is valid for one hour, and the
+      # OIDC token behind it can be exchanged exactly once.
+      - name: Exchange the OIDC token for a short-lived nuget.org key
+        id: nuget-login
+        if: github.event_name == 'push' || inputs.dry_run == false
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+
       - name: Push to nuget.org
         if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          # Via env rather than inline, so the key never appears in a command line.
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          dotnet nuget push "artifacts/*.nupkg" \
-            --source https://api.nuget.org/v3/index.json \
-            --api-key "${{ secrets.NUGET_API_KEY }}" \
-            --skip-duplicate
+          # --skip-duplicate makes a re-run after a partial failure safe: versions already on
+          # nuget.org are reported and skipped rather than failing the job.
+          if ! dotnet nuget push "artifacts/*.nupkg" \
+                 --source https://api.nuget.org/v3/index.json \
+                 --api-key "$NUGET_API_KEY" \
+                 --skip-duplicate; then
+            {
+              echo "### Push failed"
+              echo ""
+              echo "The short-lived key was issued, so the Trusted Publishing policy matched."
+              echo ""
+              echo "- **403** - the policy owner does not own these package ids, or the ids are"
+              echo "  already owned by someone else. Package ids are first-come and permanent."
+              echo "- **409** - that version already exists. Bump and re-tag."
+              echo "- **401** - the key expired. It lasts one hour; if the job was re-run from a"
+              echo "  cached state, run it again from the start."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: Create the GitHub release
         if: github.event_name == 'push'

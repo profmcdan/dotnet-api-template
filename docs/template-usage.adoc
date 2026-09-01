@@ -324,23 +324,93 @@ re-run the docs commands — nothing else needs touching.
 
 === One-time setup
 
-. Create a nuget.org account and sign in.
-. Create an API key at https://www.nuget.org/account/apikeys.
-   * *Glob pattern*: `ProfmcdanDotnetApiTemplate.*`
-   * *Scopes*: "Push new packages and package versions"
-   * Set an expiry you will actually notice — a year is typical.
-. Add it to the repository as a secret named `NUGET_API_KEY`
-  (Settings → Secrets and variables → Actions → New repository secret).
+Publishing uses nuget.org *Trusted Publishing*: GitHub mints a short-lived, cryptographically
+signed token describing this repository and workflow, nuget.org validates it against a policy you
+registered, and issues an API key that expires after an hour. Nothing long-lived is stored in the
+repository, so there is no key to leak, rotate or accidentally scope wrongly.
 
-[TIP]
+[IMPORTANT]
 ====
-Scope the key to the glob pattern rather than to "all packages". A leaked key then cannot be used
-to push anything else you own.
+Do this *before* your first tag. Without it the release workflow stops at its first step —
+nothing is published, but the tag is already out there.
 ====
 
-Package IDs are first-come, first-served and cannot be renamed or deleted once published — only
-unlisted. If you want the IDs reserved under your own prefix, apply for an
-https://learn.microsoft.com/nuget/nuget-org/id-prefix-reservation[ID prefix reservation] first.
+==== 1. Register the policy on nuget.org
+
+Sign in, click your username, choose *Trusted Publishing*, and add a policy:
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+
+| Policy name      | Anything memorable, e.g. `dotnet-api-template`
+| Owner            | You, or an organisation you are an active member of
+| Repository Owner | `profmcdan`
+| Repository       | `dotnet-api-template`
+| Workflow File    | `release.yml` — the *file name only*, not `.github/workflows/release.yml`
+| Environment      | Leave empty, unless you add a GitHub environment (see below)
+|===
+
+The policy is scoped to the *owner*, not to a package, so it covers ids that do not exist yet —
+which is what you need for a first publish.
+
+[NOTE]
+====
+Trusted Publishing is being rolled out gradually. If the option is not in your account menu yet,
+see <<If Trusted Publishing is not available yet>>.
+====
+
+==== 2. Tell the workflow who to publish as
+
+Add a repository *variable* named `NUGET_USER`, set to your nuget.org profile name — *not* your
+email address. Settings → Secrets and variables → Actions → *Variables*.
+
+It is an identifier rather than a credential, which is why it is a variable. The workflow also
+accepts it as a secret if you prefer, which is what the Microsoft documentation suggests.
+
+==== 3. Rehearse it
+
+Run the workflow from the Actions tab with `workflow_dispatch` and `dry_run: true`. That tests,
+packs, installs the packed tool and scaffolds a project with it, then uploads the packages as
+build artifacts *without* touching nuget.org.
+
+[CAUTION]
+====
+A dry run skips the token exchange, so it does not prove the policy is right. The first real
+release is what validates that — which is why the preflight step and the failure summaries exist.
+====
+
+==== Private repositories: the seven-day window
+
+A policy for a private repository starts *temporarily active* for seven days. nuget.org needs the
+numeric GitHub repository and owner ids to pin the policy, and it only receives those from a real
+publish — that is what stops someone deleting a repository, recreating it under the same name and
+inheriting your publishing rights.
+
+Publish once inside that window and the policy becomes permanently active. Miss it and the policy
+goes inactive; you can restart the window from the UI at any time.
+
+==== Optional: gate releases behind an environment
+
+For tighter control, add `environment: release` to the `publish` job, create that environment in
+Settings → Environments with required reviewers, and set *Environment* to `release` on the
+nuget.org policy. A release then needs a human approval before the token is ever minted.
+
+==== If Trusted Publishing is not available yet
+
+Fall back to an API key until it appears in your account. Create one at
+https://www.nuget.org/account/apikeys with glob pattern `ProfmcdanDotnetApiTemplate.*` and the
+"Push new packages and package versions" scope, add it as a repository secret `NUGET_API_KEY`, and
+in `.github/workflows/release.yml` drop the `NuGet/login` step and change the push step's
+environment to:
+
+[source,yaml]
+----
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+----
+
+Switch back as soon as you can. A long-lived key is the thing Trusted Publishing exists to remove.
 
 === Releasing
 
@@ -377,6 +447,7 @@ Pushing the tag triggers `.github/workflows/release.yml`, which:
 . Packs both packages with the version from the tag.
 . *Installs the packed tool and scaffolds a project with it*, so a broken package cannot reach
   nuget.org.
+. Exchanges a GitHub OIDC token for a one-hour nuget.org key, immediately before pushing.
 . Pushes to nuget.org with `--skip-duplicate`.
 . Opens a GitHub release with the packages attached and install instructions in the body.
 
@@ -412,7 +483,11 @@ git push origin HEAD --follow-tags
 
 === Publishing by hand
 
-If you would rather not use the workflow:
+Trusted Publishing only works from CI — the token comes from GitHub, so there is nothing to
+exchange on a laptop. Prefer the `workflow_dispatch` trigger if you want to release outside the
+tag flow.
+
+If you must push locally, create a temporary API key on nuget.org, use it, then revoke it:
 
 [source,bash]
 ----
@@ -515,9 +590,32 @@ Without it NuGet silently drops `.template.config/`, `.gitignore`, `.editorconfi
 | The tag was pushed without the matching version bump. See
   <<Recovering from a mismatched tag>>. Using `./scripts/release.sh` avoids it entirely.
 
+| No *Trusted Publishing* option in the nuget.org account menu
+| Still rolling out. Use <<If Trusted Publishing is not available yet>> in the meantime.
+
+| The `NuGet/login` step fails to exchange the token
+| The token did not match a policy. Every field is compared: Repository Owner, Repository, and
+  Workflow File — which is `release.yml`, the file name alone, with no `.github/workflows/`
+  prefix. If the policy sets an Environment, the job must declare the same one.
+
+| `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL`
+| The job cannot mint an OIDC token. `permissions: id-token: write` must be present, and a
+  workflow triggered from a fork will not get one.
+
+| The policy shows as inactive
+| Either the seven-day window for a private repository lapsed before the first publish — restart
+  it from the UI — or the policy is owned by an organisation you are no longer a member of.
+
 | `dotnet nuget push` returns 403
-| The API key is missing, expired, or its glob pattern does not cover the package ID. Keys are
-  scoped to `ProfmcdanDotnetApiTemplate.*` by the setup above.
+| The key was issued, so the policy matched, but the policy owner does not own that package id.
+  Ids are first-come and permanent; check nobody else has taken it.
+
+| `dotnet nuget push` returns 409
+| That version already exists on nuget.org. Versions are immutable: bump and re-tag. The workflow
+  passes `--skip-duplicate`, so this only surfaces when pushing by hand.
+
+| `dotnet nuget push` returns 401 after the key was issued
+| The key expired — it lasts one hour. Re-run the job from the start rather than resuming it.
 
 | `--add-source ./artifacts` is ignored with "the source is not valid"
 | NuGet needs an absolute path there. Use `"$PWD/artifacts"`.

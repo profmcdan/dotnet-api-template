@@ -316,7 +316,17 @@ git push origin HEAD --follow-tags
 
 Pushing the tag runs `.github/workflows/release.yml`, which tests, packs both packages, installs
 the packed tool and scaffolds a project with it, then pushes to nuget.org and opens a GitHub
-release. It needs one repository secret, `NUGET_API_KEY`.
+release.
+
+Publishing uses nuget.org *Trusted Publishing* — GitHub mints a short-lived signed token,
+nuget.org exchanges it for a key that expires in an hour, and no long-lived credential is stored
+anywhere. Two things to set up before your first tag:
+
+* a Trusted Publishing policy on nuget.org naming this repository and `release.yml`;
+* a repository variable `NUGET_USER` holding your nuget.org profile name.
+
+The workflow checks both in its first step and publishes nothing without them. Rehearse with the
+`workflow_dispatch` trigger and `dry_run: true`.
 
 Bump with the script rather than by hand — the workflow refuses to publish when the tag and the
 checked-in version disagree.
