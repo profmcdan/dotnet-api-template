@@ -1,0 +1,249 @@
+= CleanArchTemplate
+:toc: macro
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+A production-shaped ASP.NET Core Web API template: clean architecture, JWT user management with
+an invite-by-email flow carried over Kafka, a transactional outbox, EF Core on PostgreSQL, Redis,
+a migrator job, background workers, and a Docker Compose stack that runs the whole thing.
+
+It is a `dotnet new` template. Generate a project, set a few values in `.env`, and
+`docker compose up` gives you a working system with a seeded administrator, created Kafka topics
+and a local mail catcher.
+
+toc::[]
+
+== What you get
+
+[cols="1,3", options="header"]
+|===
+| Area | What is already built
+
+| Architecture
+| Four layers with a one-way dependency rule, enforced by project references. Domain has no
+  dependencies at all.
+
+| CQRS
+| A small hand-rolled dispatcher with logging, validation and transaction behaviours.
+  *No MediatR* - no licence to worry about, and about 60 lines you can actually read.
+
+| Persistence
+| EF Core 10 on PostgreSQL 18. Explicit column mappings, partial unique indexes, `timestamptz`
+  everywhere, soft delete, audit columns applied by an interceptor.
+
+| User management
+| Invite → accept → sign in. Roles, suspension and reinstatement, self-service profile and
+  password change.
+
+| Authentication
+| Short-lived JWT access tokens plus rotating refresh tokens with reuse detection, and a security
+  stamp so suspension takes effect immediately rather than whenever the token expires.
+
+| Messaging
+| Kafka (Redpanda locally) with a transactional outbox, a configurable topic prefix, explicit
+  topic provisioning, manual offset commits, bounded retries and a dead-letter topic.
+
+| Email
+| HTML and plain-text templates with an action callout button, rendered from embedded resources
+  and delivered by a dedicated worker. Idempotency keys stop duplicate sends.
+
+| Operations
+| Multi-stage non-root Dockerfile, read-only root filesystem, liveness and readiness probes,
+  Serilog, OpenTelemetry traces and metrics, a run-to-completion migrator job.
+
+| Tests
+| Domain and application unit tests, plus integration tests that run against real PostgreSQL,
+  Redis and Redpanda containers via Testcontainers.
+|===
+
+== Quick start
+
+[source,bash]
+----
+cp .env.sample .env          # then edit JWT__SIGNINGKEY and the passwords
+docker compose up -d
+----
+
+That builds three images and starts seven containers. The migrator applies the schema, creates
+the Kafka topics and seeds the bootstrap administrator, then the API and worker start.
+
+[cols="2,3,3", options="header"]
+|===
+| Service | URL | Notes
+
+| API | http://localhost:5080 | REST surface
+| API reference | http://localhost:5080/scalar/v1 | Development only
+| Health | http://localhost:5080/health/ready | `live` and `ready` are separate
+| Redpanda Console | http://localhost:8085 | Browse topics and messages
+| Mailpit | http://localhost:8025 | Every outbound email lands here
+| Postgres | localhost:5432 | Credentials from `.env`
+| Redis | localhost:6379 |
+|===
+
+Try the invite flow end to end:
+
+[source,bash]
+----
+# 1. sign in as the seeded administrator
+TOKEN=$(curl -s -X POST http://localhost:5080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"change-me-immediately-1"}' \
+  | jq -r .accessToken)
+
+# 2. invite someone
+curl -s -X POST http://localhost:5080/api/v1/users/invitations \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","fullName":"Ada Lovelace","roles":["member"]}'
+
+# 3. open http://localhost:8025 and click the invitation link
+----
+
+Behind those two calls: the API wrote a user, an invitation and an outbox row in one transaction;
+the outbox processor published to `<prefix>.user.invited`; a consumer turned that into
+`<prefix>.email.requested`; and the email worker rendered the template and sent it.
+
+== How a request travels
+
+[listing]
+----
+  HTTP                Application                         Infrastructure
+  ────                ───────────                         ──────────────
+  Controller
+     │  ISender.SendAsync(command)
+     ▼
+  LoggingBehavior ──▶ ValidationBehavior ──▶ TransactionBehavior
+                                                   │
+                                                   ▼
+                                          Command handler
+                                             │        │
+                        repository interfaces│        │domain aggregate
+                                             ▼        ▼
+                                     EF Core repo   User / Invitation
+                                             │        │ raises domain events
+                                             ▼        ▼
+                                     SaveChangesAsync ── interceptor ──▶ outbox row
+                                             │                            (same transaction)
+                                             ▼
+                                         PostgreSQL
+----
+
+The controller never touches a `DbContext`, a repository or a query. It depends on `ISender` and
+nothing else, which is what keeps the HTTP layer swappable and the handlers testable without a
+web host.
+
+== Repository layout
+
+[listing]
+----
+src/
+  CleanArchTemplate.Domain          entities, value objects, domain events, invariants  (no dependencies)
+  CleanArchTemplate.Contracts       the public Kafka event contracts and topic catalogue
+  CleanArchTemplate.Application     commands, queries, handlers, ports (interfaces), dispatcher
+  CleanArchTemplate.Infrastructure  EF Core, Kafka, Redis, JWT, SMTP, email templates, outbox
+  CleanArchTemplate.Api             controllers, auth, rate limiting, OpenAPI, optional gRPC
+  CleanArchTemplate.Migrator        run-to-completion job: migrations, topics, admin seed
+  CleanArchTemplate.Worker          outbox processor, Kafka consumers, scheduled cleanup
+
+tests/
+  CleanArchTemplate.Domain.UnitTests        invariants, no mocks needed
+  CleanArchTemplate.Application.UnitTests   handlers against substituted ports
+  CleanArchTemplate.Api.IntegrationTests    real Postgres, Redis and Redpanda containers
+
+docs/                               architecture, design and installation documentation
+Dockerfile                          multi-stage, non-root, one file for all three services
+compose.yml                         the full local stack
+.env.sample                         every setting, documented - copy to .env
+----
+
+== Documentation
+
+Everything lives in link:docs/README.adoc[`docs/`].
+
+[cols="1,3", options="header"]
+|===
+| Document | Read it when you want to
+
+| link:docs/architecture.adoc[Architecture]
+| Understand the layers, the runtime topology, the outbox, delivery guarantees and failure modes.
+
+| link:docs/design.adoc[Design]
+| Work inside the code: the domain model, the dispatcher, auth design, caching, and recipes for
+  adding a command, an event or an email template.
+
+| link:docs/install.adoc[Installation]
+| Get it running on macOS or Windows, with or without Docker, and run the tests.
+
+| link:docs/template-usage.adoc[Template usage]
+| Install the `dotnet new` template and generate a new project from it.
+
+| link:docs/diagrams/README.adoc[Diagrams]
+| Render the PlantUML sources behind the ASCII diagrams in the documents above.
+|===
+
+== Template parameters
+
+[source,bash]
+----
+dotnet new install .
+dotnet new cleanapi -n Acme.Billing --allow-grpc --kafka-topic-prefix billing
+----
+
+[cols="2,1,1,3", options="header"]
+|===
+| Parameter | Alias | Default | Effect
+
+| `-n, --name`                | | _directory name_ | Renames the solution, every project, namespace and assembly.
+| `--allow-grpc`              | `-g` | `false`     | Adds a gRPC surface over the same query handlers, plus reflection in Development.
+| `--kafka-topic-prefix`      | `-k` | `cleanarch` | Prefix for every topic, the Redis key namespace and the consumer group.
+| `--api-port`                | `-p` | `5080`      | Host port Compose publishes the API on.
+| `--database-name`           | `-d` | `appdb`     | PostgreSQL database name.
+| `--include-tests`           | `-t` | `true`      | Include the three test projects.
+| `--include-docs`            |      | `true`      | Include this `docs/` folder.
+| `--skip-restore`            |      | `false`     | Skip the automatic restore after generation.
+|===
+
+See link:docs/template-usage.adoc[template usage] for the full walk-through, including Windows.
+
+== Common tasks
+
+[source,bash]
+----
+# build and test everything
+dotnet build CleanArchTemplate.slnx
+dotnet test CleanArchTemplate.slnx
+
+# unit tests only (no Docker required)
+dotnet test tests/CleanArchTemplate.Domain.UnitTests
+dotnet test tests/CleanArchTemplate.Application.UnitTests
+
+# add a migration (Infrastructure holds them, Migrator is the startup project)
+dotnet dotnet-ef migrations add AddThing \
+  --project src/CleanArchTemplate.Infrastructure \
+  --startup-project src/CleanArchTemplate.Migrator \
+  --output-dir Persistence/Migrations
+
+# re-run only the topic seeding step
+docker compose run --rm migrator kafka-topics
+
+# follow the worker
+docker compose logs -f worker
+
+# stop everything, keeping data
+docker compose down
+
+# stop everything and delete the volumes
+docker compose down -v
+----
+
+== Before you ship
+
+* Replace `JWT__SIGNINGKEY` with a real secret (`openssl rand -base64 48`) held in a secret store,
+  not in `.env`.
+* Change `POSTGRES_PASSWORD` and remove `MIGRATOR__SEEDADMINEMAIL` / `MIGRATOR__SEEDADMINPASSWORD`
+  once a real administrator exists.
+* Point `APP__PUBLICBASEURL` at your real front end - every link in every email is built from it.
+* Put a shared rate limiter at the edge. The built-in limiter is per instance.
+* Set `KAFKA__DEFAULTREPLICATIONFACTOR` to at least `3` on a real cluster.
+* Review link:docs/architecture.adoc#_failure_modes[failure modes] and decide which alerts you want.

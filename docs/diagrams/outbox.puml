@@ -1,0 +1,50 @@
+@startuml outbox
+title The transactional outbox — one transaction, two facts
+
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+
+participant "Command handler" as H
+participant "AppDbContext" as Ctx
+participant "DomainEventsToOutboxInterceptor" as Int
+database "postgres" as Pg
+participant "OutboxProcessor\n(worker)" as Out
+queue "kafka" as K
+
+H -> Ctx : users.Add(user)\ninvitations.Add(invitation)
+note right of H
+  The aggregate raised
+  UserInvitedDomainEvent.
+  Nothing is published here.
+end note
+
+H -> Ctx : SaveChangesAsync()
+activate Ctx
+Ctx -> Int : SavingChanges
+activate Int
+Int -> Int : drain domain events\ntranslate to integration events
+Int -> Ctx : add OutboxMessage rows
+deactivate Int
+Ctx -> Pg : BEGIN\n  INSERT users\n  INSERT invitations\n  INSERT outbox_messages\nCOMMIT
+deactivate Ctx
+
+note over Pg
+  The state change and the intent to
+  publish commit together, or neither
+  does. No dual write.
+end note
+
+Out -> Pg : SELECT … FOR UPDATE SKIP LOCKED
+activate Out
+Out -> K : publish
+Out -> Pg : set processed_at
+deactivate Out
+
+note right of Out
+  At-least-once: the broker may ack
+  immediately before the row is marked.
+  Every event carries a stable EventId
+  so consumers can deduplicate.
+end note
+
+@enduml

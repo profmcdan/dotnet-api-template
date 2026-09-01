@@ -1,0 +1,57 @@
+@startuml invite-flow
+title Invite a user — end to end
+
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+
+actor Administrator as Admin
+participant "api" as Api
+database "postgres" as Pg
+participant "worker" as Worker
+queue "kafka" as K
+participant "SMTP" as Smtp
+actor Invitee
+
+Admin -> Api : POST /api/v1/users/invitations
+activate Api
+Api -> Api : InviteUserCommand\nvalidate · check address is free
+Api -> Api : UserInvitationService.Invite\nUser(Invited) + Invitation(token hash only)
+Api -> Pg : one transaction:\nusers + invitations + outbox_messages
+Api --> Admin : 201 Created
+deactivate Api
+
+Worker -> Pg : poll outbox
+activate Worker
+Worker -> K : <prefix>.user.invited
+deactivate Worker
+
+K -> Worker : UserInvitedConsumer
+activate Worker
+Worker -> K : <prefix>.email.requested
+note right of Worker
+  Deciding to send and actually sending
+  are separate hops, so a broken SMTP
+  server cannot stall user events.
+end note
+deactivate Worker
+
+K -> Worker : EmailDispatchConsumer
+activate Worker
+Worker -> Worker : claim idempotency key (Redis SET NX)\nrender template
+Worker -> Smtp : send
+deactivate Worker
+Smtp -> Invitee : invitation email\nwith accept link
+
+Invitee -> Api : POST /api/v1/auth/invitations/accept\n(token, password)
+activate Api
+Api -> Pg : consume invitation · activate user\nissue refresh token
+Api --> Invitee : 200 + access & refresh tokens
+deactivate Api
+
+note over Invitee
+  Accepting signs them straight in.
+  They just proved possession of a
+  single-use secret.
+end note
+
+@enduml

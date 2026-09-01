@@ -8,9 +8,11 @@
     <Project Path="src/CleanArchTemplate.Migrator/CleanArchTemplate.Migrator.csproj" />
     <Project Path="src/CleanArchTemplate.Worker/CleanArchTemplate.Worker.csproj" />
   </Folder>
+  <!--#if (IncludeTests) -->
   <Folder Name="/tests/">
     <Project Path="tests/CleanArchTemplate.Api.IntegrationTests/CleanArchTemplate.Api.IntegrationTests.csproj" />
     <Project Path="tests/CleanArchTemplate.Application.UnitTests/CleanArchTemplate.Application.UnitTests.csproj" />
     <Project Path="tests/CleanArchTemplate.Domain.UnitTests/CleanArchTemplate.Domain.UnitTests.csproj" />
   </Folder>
+  <!--#endif -->
 </Solution>

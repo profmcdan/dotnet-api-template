@@ -1,0 +1,487 @@
+= Design
+:toc: macro
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+The code-level companion to link:architecture.adoc[Architecture]. Read that first for the shape
+of the system; read this to work inside it.
+
+toc::[]
+
+== Domain model
+
+_Rendered version: link:diagrams/domain-model.puml[`diagrams/domain-model.puml`]._
+
+[listing]
+----
+   ┌─────────────────────────────┐         ┌──────────────────────────────┐
+   │ User (aggregate root)       │         │ Invitation (aggregate root)  │
+   ├─────────────────────────────┤         ├──────────────────────────────┤
+   │ Id            Guid v7       │◀───────┐│ Id             Guid v7       │
+   │ Email         Email (VO)    │  UserId ││ UserId         Guid          │
+   │ FullName      string        │        ││ Email          string        │
+   │ Status        Invited       │        ││ TokenHash      sha256 hex     │
+   │               Active        │        ││ ExpiresAt      timestamptz    │
+   │               Suspended     │        ││ Status         Pending        │
+   │ PasswordHash  string?       │        ││                Accepted       │
+   │ SecurityStamp int           │        ││                Revoked        │
+   │ Roles         text[]        │        ││ SendCount      int            │
+   │ …audit, soft delete         │        ││ LastSentAt     timestamptz    │
+   └─────────────────────────────┘        │└──────────────────────────────┘
+                 ▲                        │
+                 │ UserId                 │
+   ┌─────────────┴───────────────┐        │
+   │ RefreshToken (entity)       │        │
+   ├─────────────────────────────┤        │        ┌──────────────────────┐
+   │ TokenHash   sha256 hex      │        └────────│ OutboxMessage        │
+   │ ChainId     groups a login  │                 ├──────────────────────┤
+   │ ExpiresAt / RevokedAt       │                 │ Topic, PartitionKey  │
+   │ ReplacedByTokenId           │                 │ Payload  jsonb       │
+   └─────────────────────────────┘                 │ Attempts, NextAttempt│
+                                                   │ ProcessedAt / DLQ    │
+                                                   └──────────────────────┘
+----
+
+Ids are `Guid.CreateVersion7()`: random enough to be unguessable, but time-ordered, so index
+locality does not collapse the way it does with v4 primary keys.
+
+=== Invariants, and where they live
+
+Aggregates are not data bags. Every state change goes through a method that returns a `Result`,
+and the setters are private.
+
+[cols="2,3", options="header"]
+|===
+| Invariant | Enforced by
+
+| An email address is syntactically valid and normalised
+| `Email.Create` - the only way to make one
+
+| A user always has at least one known role
+| `User.Invite` / `User.ChangeRoles`
+
+| An invited user cannot authenticate
+| `User.CanAuthenticate`, which requires `Active` *and* a password hash
+
+| An invitation is single-use
+| `Invitation.Accept` rejects anything not `Pending`
+
+| An expired invitation cannot be accepted
+| `Invitation.Accept` compares against the clock passed in
+
+| Resending is throttled
+| `Invitation.Refresh` enforces `MinimumResendInterval`
+
+| Revocation and role changes invalidate live tokens
+| `SecurityStamp` is bumped by every method that should have that effect
+
+| One pending invitation per user
+| A partial unique index in the database, not a read-then-write race
+|===
+
+Two invariants span both aggregates - a pending invitation always has exactly one invited user,
+and the raw token exists only in the emitted event. Those live in `UserInvitationService`, a
+domain service, because no single aggregate can own them.
+
+=== Domain events
+
+Aggregates raise events; they never publish them. `AggregateRoot` collects them,
+`DomainEventsToOutboxInterceptor` drains them during `SaveChanges`, and `DomainEventTranslator`
+maps them onto the public contract.
+
+That translator is deliberately the one place where internal facts become public ones. It is
+many-to-many: some domain events publish nothing at all, and `UserInvitedDomainEvent` and
+`UserInvitationResentDomainEvent` both become `UserInvitedIntegrationEvent` with a flag.
+
+== Result and error handling
+
+Expected failures are values. Exceptions are for the unexpected.
+
+[source,csharp]
+----
+var result = await sender.SendAsync(new InviteUserCommand(email, name, roles), ct);
+return result.ToActionResult(this);   // one mapping, used by every endpoint
+----
+
+`Error` carries a stable machine-readable `Code`, a human `Description`, and an `ErrorType` that
+decides the status code:
+
+[cols="2,1,3", options="header"]
+|===
+| `ErrorType` | Status | Example
+
+| `Validation`   | 400 | `email.invalid`, `auth.weak_password`
+| `Unauthorized` | 401 | `user.invalid_credentials`
+| `Forbidden`    | 403 | `user.not_active`, `user.cannot_suspend_self`
+| `NotFound`     | 404 | `user.not_found`, `invitation.invalid_token`
+| `Conflict`     | 409 | `user.email_in_use`, `invitation.already_accepted`
+| `Unavailable`  | 503 | a downstream dependency
+| `Failure`      | 500 | anything else
+|===
+
+`ValidationError` is the one subtype, carrying per-field failures so `ResultExtensions` can emit a
+`ValidationProblemDetails` with the field names camel-cased the way clients expect.
+
+Codes are stable and safe to switch on. Descriptions are not - treat them as display text.
+
+== The dispatcher
+
+There is no MediatR. `ISender` resolves a handler and wraps it in the registered behaviours:
+
+[source,csharp]
+----
+public interface ICommand<TResponse> : IRequest<Result<TResponse>>;
+public interface IQuery<TResponse>    : IRequest<Result<TResponse>>;
+
+public interface IRequestHandler<in TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    Task<TResponse> HandleAsync(TRequest request, CancellationToken cancellationToken);
+}
+----
+
+`Sender` builds a closed generic executor per request type and caches it, so reflection is paid
+once per type, on first use. Handlers are discovered by scanning the Application assembly, so a
+new feature folder is wired up simply by existing.
+
+=== Behaviours
+
+Registration order is outermost-first:
+
+[listing]
+----
+   LoggingBehavior          logs outcome + duration; never logs the request body,
+        │                   which routinely holds passwords and tokens
+        ▼
+   ValidationBehavior       runs FluentValidation, returns ValidationError as a
+        │                   failed Result rather than throwing
+        ▼
+   TransactionBehavior      only for ITransactionalRequest; rolls back when the
+        │                   handler returns a failure
+        ▼
+   handler
+----
+
+`TransactionBehavior` is opt-in via the `ITransactionalRequest` marker. A command that calls
+`SaveChanges` once does not need it - that call is already atomic. A command touching two
+aggregates, or saving twice, does.
+
+The rollback path deserves a note: a handler that returns a *failed Result* has not thrown, so
+nothing would normally abort the transaction. The behaviour throws an internal
+`TransactionRollbackException` carrying the result, lets the transaction abort, then unwraps it.
+Callers still see a `Result`, never that exception.
+
+== Authentication and user management
+
+=== The invite flow
+
+_Rendered version: link:diagrams/invite-flow.puml[`diagrams/invite-flow.puml`]._
+
+[listing]
+----
+   admin                api                        db                worker           invitee
+     │                   │                          │                   │                │
+     │ POST invitations  │                          │                   │                │
+     │──────────────────▶│                          │                   │                │
+     │                   │ UserInvitationService    │                   │                │
+     │                   │  · User (Invited)        │                   │                │
+     │                   │  · Invitation (hash only)│                   │                │
+     │                   │  · raises UserInvited    │                   │                │
+     │                   │─────── one transaction ─▶│                   │                │
+     │                   │   users + invitations    │                   │                │
+     │                   │   + outbox_messages      │                   │                │
+     │  201 Created      │                          │                   │                │
+     │◀──────────────────│                          │                   │                │
+     │                   │                          │  poll outbox      │                │
+     │                   │                          │◀──────────────────│                │
+     │                   │                     user.invited ───────────▶│                │
+     │                   │                   email.requested ──────────▶│                │
+     │                   │                          │      render + SMTP│───────────────▶│
+     │                   │                          │                   │   invitation   │
+     │                   │                          │                   │                │
+     │                   │  POST invitations/accept (token, password)   │                │
+     │                   │◀─────────────────────────────────────────────────────────────│
+     │                   │  consume invitation · activate · issue tokens │               │
+     │                   │─────────────────────────▶│                   │                │
+     │                   │  200 + access & refresh token                │                │
+     │                   │─────────────────────────────────────────────────────────────▶│
+----
+
+Accepting signs the invitee straight in. Bouncing someone to a login form immediately after they
+chose a password they have not yet saved is a small cruelty with no security benefit - they just
+proved possession of a single-use secret.
+
+=== Where the raw token lives
+
+The invitation aggregate stores only `sha256(token)`. The raw value appears in exactly two places:
+the domain event (and therefore the outbox row) and the email itself. Outbox rows are deleted
+after `Outbox:RetentionDays`.
+
+This is a deliberate, documented trade: the alternative is a second store for pending secrets,
+which is more moving parts for the same exposure inside your own database.
+
+=== Password policy
+
+Length first, in the spirit of NIST SP 800-63B: minimum 12 characters, at least one letter and one
+digit or symbol, and a small list of banned substrings. No forced rotation, no character-class
+theatre. A long passphrase beats a short one full of symbols.
+
+Note that "correct-horse-battery-1" passes and "ada-strong-password-1" does not - the second
+contains `password`.
+
+=== Session model
+
+[cols="2,3", options="header"]
+|===
+| Token | Behaviour
+
+| Access
+| 15 minutes, HS256, carries `sub`, `email`, `name`, roles and `sstamp`. Never stored server-side.
+
+| Refresh
+| 14 days, rotated on every use. Stored as a hash with a `ChainId` that groups every token
+  descended from one login.
+|===
+
+`SecurityStampValidator` runs on `OnTokenValidated`, comparing the token's `sstamp` against the
+stored one. The lookup is cached in Redis for five minutes and evicted by `UserCache.InvalidateAsync`,
+so the common path is a Redis GET rather than a database round-trip - and a suspension takes
+effect on the very next request.
+
+[WARNING]
+====
+Anything that bumps `SecurityStamp` must call `UserCache.InvalidateAsync`. Forget it and a
+suspended user keeps working until the cached stamp expires. That is exactly why the eviction is
+a single helper rather than three `RemoveAsync` calls copied between handlers.
+====
+
+== Caching
+
+[cols="2,2,3", options="header"]
+|===
+| Key | TTL | Invalidated by
+
+| `user:{id}`             | 5 min  | `UserCache.InvalidateAsync`
+| `security-stamp:{id}`   | 5 min  | `UserCache.InvalidateAsync`
+| `user-list:*`           | 5 min  | any write to a user
+| `login-attempts:{email}`| window | a successful sign-in
+| `email-claim:{key}`     | 3 days | a failed send releases it
+|===
+
+Two properties matter in `RedisCacheService`:
+
+* *Every Redis fault is swallowed and logged.* A cache outage costs latency, never correctness.
+  Reads fall through to the source, writes are best-effort.
+* *A miss is distinguished from `default(T)`.* `TryGetAsync` returns a found flag, because a
+  cached `0` or `false` is otherwise indistinguishable from an empty cache - which would have
+  made every security stamp read return `0` and silently accept stale tokens.
+
+`RemoveByPrefixAsync` scans rather than using `KEYS`, which blocks the server. It is still
+O(keyspace); reserve it for coarse invalidation.
+
+== Email
+
+=== Rendering
+
+Templates are embedded resources under `Infrastructure/Notifications/Templates`, one `.html` and
+one `.txt` per template, wrapped by `_layout.html` / `_layout.txt`.
+
+Metadata sits in leading `@key: value` lines:
+
+[source,html]
+----
+@subject: {{InvitedByName}} invited you to {{AppName}}
+@preheader: Your invitation expires on {{ExpiresAt}}.
+@action: Accept your invitation
+@actionHint: This invitation is personal to you and can only be used once.
+<p>Hi {{FullName}},</p>
+...
+----
+
+The renderer supports a deliberately small mustache subset - `{{Key}}` substitution and
+`{{#Key}}…{{/Key}}` blocks that appear only when the key has a value. A full template engine would
+be a much larger attack surface for something that renders four trusted files.
+
+*Model values are HTML-encoded; template files are the only trusted input.* Unknown placeholders
+render empty rather than leaking `{{Foo}}` into a customer's inbox.
+
+The action callout - the bordered box with the button and the copyable fallback URL - lives in the
+layout inside a `{{#ActionUrl}}` block, so any template that supplies an `ActionUrl` gets it and
+any template that does not simply omits it.
+
+The markup is table-based with inline styles on purpose. Outlook and several webmail clients strip
+`<style>` blocks and ignore flexbox; semantic markup would arrive as an unstyled wall of text.
+
+=== Delivery and deduplication
+
+Kafka is at-least-once, so `EmailDispatchConsumer` claims the idempotency key with Redis `SET NX`
+before sending and releases it if the send throws - the retry then legitimately re-claims it.
+
+The residual failure mode is a duplicate email when a send succeeds but the process dies before
+committing the offset. That is the right way round for an invitation.
+
+If Redis is unreachable the claim is *granted*. A duplicate email beats a silently dropped
+invitation.
+
+== Persistence details
+
+[cols="2,3", options="header"]
+|===
+| Choice | Reason
+
+| Explicit column names
+| Snake case without a naming-convention package. Verbose, but the schema is readable directly in
+  the configuration files.
+
+| `timestamptz` everywhere
+| Configured once in `ConfigureConventions`. Nothing depends on the server's local zone.
+
+| Soft delete on `User`
+| A global query filter hides deleted rows. Revoking an invitation soft-deletes the placeholder
+  user, and the partial unique index on email excludes deleted rows, so the address is free to be
+  invited again.
+
+| Partial unique indexes
+| `ix_users_email_unique` filtered on `deleted_at IS NULL`; `ix_invitations_user_pending` filtered
+  on `status = 0`. The database enforces "one pending invitation per user" - not a read-then-write
+  that two concurrent requests can both pass.
+
+| `jsonb` outbox payload
+| Readable and queryable in `psql` when you are trying to work out what went wrong at 3am. The
+  cost is that `LIKE` needs a cast.
+
+| Read/write split
+| `IUserReadRepository` projects straight to DTOs with `AsNoTracking`. A list screen never drags
+  aggregates, or their domain events, into the change tracker.
+
+| Keyset tiebreaker
+| Every paged query adds `ThenBy(Id)`. Without it, rows with equal sort keys can repeat or vanish
+  across pages.
+|===
+
+== Recipes
+
+=== Add a command
+
+. Put the record and its handler in one file under `Application/<Feature>/Commands`.
++
+[source,csharp]
+----
+public sealed record ArchiveProjectCommand(Guid ProjectId) : ICommand, ITransactionalRequest;
+
+internal sealed class ArchiveProjectCommandHandler(
+    IProjectRepository projects,
+    IUnitOfWork unitOfWork) : ICommandHandler<ArchiveProjectCommand>
+{
+    public async Task<Result> HandleAsync(ArchiveProjectCommand request, CancellationToken ct)
+    {
+        var project = await projects.GetByIdAsync(request.ProjectId, ct);
+        if (project is null)
+        {
+            return Result.Failure(ProjectErrors.NotFound(request.ProjectId));
+        }
+
+        var archived = project.Archive();
+        if (archived.IsFailure)
+        {
+            return archived;
+        }
+
+        await unitOfWork.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+}
+----
+. Add an `AbstractValidator<ArchiveProjectCommand>` in the same file if it needs input validation.
+. Call it from a controller with `sender.SendAsync(...)` and `.ToActionResult(this)`.
+
+No registration step - handlers and validators are both found by assembly scanning.
+
+=== Add an integration event
+
+. Add the logical name and a `TopicSpecification` to `Contracts/Messaging/Topics.cs`.
+. Add the event record in `Contracts`, marked with `[Topic(Topics.YourTopic)]`.
+. Raise a domain event from the aggregate.
+. Map it in `DomainEventTranslator`, choosing a partition key that preserves the ordering you
+  need - use the aggregate id unless you have a reason not to.
+. Run `docker compose run --rm migrator kafka-topics` to create it.
+
+The outbox picks it up automatically; there is nothing to register.
+
+=== Add a consumer
+
+[source,csharp]
+----
+internal sealed class ProjectArchivedConsumer(
+    IServiceScopeFactory scopeFactory,
+    IOptions<KafkaOptions> kafkaOptions,
+    ITopicResolver topics,
+    ILogger<ProjectArchivedConsumer> logger)
+    : KafkaConsumerBase<ProjectArchivedIntegrationEvent>(scopeFactory, kafkaOptions, topics, logger)
+{
+    protected override string LogicalTopic => Topics.ProjectArchived;
+    protected override string GroupSuffix  => "project-archived-audit";   // unique per consumer
+    protected override string? DeadLetterTopic => Topics.AuditDeadLetter;
+
+    protected override Task HandleAsync(
+        ProjectArchivedIntegrationEvent message, IServiceProvider services, CancellationToken ct)
+    {
+        // must be idempotent: delivery is at-least-once
+    }
+}
+----
+
+Register it with `builder.Services.AddHostedService<ProjectArchivedConsumer>()`.
+
+[IMPORTANT]
+====
+`GroupSuffix` must be unique per consumer. Two consumers sharing a group split the partitions
+between them, and each sees only part of the traffic.
+====
+
+=== Add an email template
+
+. Create `Notifications/Templates/your-template.html` and `.txt`. They are picked up by the
+  existing `EmbeddedResource` glob.
+. Add `@subject:` and, if it needs a button, `@action:` and `@actionHint:`.
+. Add the id to `EmailTemplates` in `Contracts`.
+. Publish an `EmailRequestedIntegrationEvent` with `TemplateId`, the model, and an idempotency key
+  that is stable for "this exact email" but changes when a resend genuinely should send again.
+
+=== Add a role
+
+. Add the constant to `UserRoles` and include it in `All`.
+. Add a policy in `AuthorizationPolicies` if it needs its own.
+. Use `[Authorize(AuthorizationPolicies.YourPolicy)]`.
+
+Roles are validated against `UserRoles.All` in the domain, so an unknown role is rejected before
+it can be persisted.
+
+== Testing strategy
+
+[cols="2,3", options="header"]
+|===
+| Layer | Approach
+
+| `Domain.UnitTests`
+| Plain construction and assertions. No mocks, no fixtures - if a domain test needs a mock, the
+  invariant has probably leaked out of the aggregate.
+
+| `Application.UnitTests`
+| Handlers against substituted ports (NSubstitute) plus small hand-written fakes for the clock and
+  cache, so time and cache behaviour are asserted rather than waited on.
+
+| `Api.IntegrationTests`
+| The real API against real PostgreSQL, Redis and Redpanda via Testcontainers. Substituting an
+  in-memory provider would stop testing the two things most likely to break: the partial unique
+  indexes, and whether the outbox interceptor really writes in the same transaction.
+|===
+
+The integration fixture skips rather than fails when Docker is unavailable, so a laptop without a
+running daemon still gets a green unit-test run.
+
+Configuration is injected as environment variables rather than through
+`ConfigureAppConfiguration`, because `Program.cs` reads `builder.Configuration` inline - before
+`WebApplicationFactory`'s configuration callbacks run. Environment variables are the only source
+available that early, and they are the same mechanism Compose uses.

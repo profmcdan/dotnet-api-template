@@ -1,0 +1,42 @@
+@startuml runtime
+title CleanArchTemplate — runtime topology
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+
+actor Client
+node "api\n(stateless, scale to N)" as Api
+node "worker\noutbox drain + consumers" as Worker
+node "migrator\nrun to completion" as Migrator
+
+database "postgres 18\naggregates + outbox" as Pg
+database "redis\ncache · stamps · claims" as Redis
+queue "redpanda (kafka)" as Kafka
+node "mailpit / SMTP" as Smtp
+
+Client --> Api : HTTPS
+Api --> Pg : read / write
+Api --> Redis : cache, security stamps,\nlogin throttling
+
+Migrator --> Pg : migrations, admin seed
+Migrator --> Kafka : create topics
+
+Worker --> Pg : poll outbox\nFOR UPDATE SKIP LOCKED
+Worker --> Kafka : publish + consume
+Worker --> Redis : email idempotency claims
+Worker --> Smtp : deliver
+
+note right of Migrator
+  Runs to completion before api and
+  worker start. A single writer, whatever
+  the replica count.
+end note
+
+note bottom of Worker
+  Publishing is kept off the request path,
+  and scales on message volume rather than
+  on request volume.
+end note
+
+@enduml

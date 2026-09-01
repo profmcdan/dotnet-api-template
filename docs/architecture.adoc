@@ -1,0 +1,458 @@
+= Architecture
+:toc: macro
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+Part of the link:../README.adoc[CleanArchTemplate documentation]. See also
+link:design.adoc[Design] for the code-level view and link:install.adoc[Installation] to run it.
+
+toc::[]
+
+== Goals and constraints
+
+This template optimises for three things, in order.
+
+. *Changeability.* Business rules should be readable and testable without a database, a broker or
+  a web host. That is the entire justification for the layering.
+. *Correctness under partial failure.* Distributed systems fail in the gaps between components.
+  Anywhere a state change and a message have to agree, they commit together.
+. *Operability.* A new engineer should be able to run it in one command, see what it is doing,
+  and understand why something failed.
+
+Everything below is downstream of those three.
+
+== Layers and the dependency rule
+
+_Rendered version: link:diagrams/layers.puml[`diagrams/layers.puml`]._
+
+[listing]
+----
+        ┌──────────────────────────────────────────────────────────────┐
+        │                          Api                                 │
+        │  controllers · auth · rate limiting · OpenAPI · gRPC         │
+        └───────────────┬──────────────────────────────┬───────────────┘
+                        │                              │
+        ┌───────────────▼──────────────┐  ┌────────────▼───────────────┐
+        │        Application           │  │      Infrastructure        │
+        │  commands · queries          │◀─┤  EF Core · Kafka · Redis   │
+        │  handlers · behaviours       │  │  JWT · SMTP · outbox       │
+        │  ports (interfaces)          │  │  (implements the ports)    │
+        └───────────────┬──────────────┘  └────────────┬───────────────┘
+                        │                              │
+        ┌───────────────▼──────────────────────────────▼───────────────┐
+        │                         Domain                               │
+        │  aggregates · value objects · domain events · invariants     │
+        │  no dependencies on anything                                 │
+        └──────────────────────────────────────────────────────────────┘
+
+              Contracts  ──▶  referenced by Application, Infrastructure
+              (the public integration event schema and topic catalogue)
+----
+
+The rule is that arrows only ever point inward, and it is enforced by project references rather
+than by convention:
+
+[cols="2,3", options="header"]
+|===
+| Project | May reference
+
+| `Domain`          | nothing
+| `Contracts`       | nothing
+| `Application`     | `Domain`, `Contracts`
+| `Infrastructure`  | `Application` (and transitively `Domain`, `Contracts`)
+| `Api`             | `Application`, `Infrastructure`
+| `Migrator`        | `Infrastructure`
+| `Worker`          | `Infrastructure`
+|===
+
+`Application` declares *ports* - `IUserRepository`, `IEventPublisher`, `ICacheService`,
+`IEmailSender`, `IClock` and friends - and `Infrastructure` supplies the adapters. That inversion
+is what lets a handler be unit-tested with substituted ports and no container in sight.
+
+=== Why the controller cannot reach the database
+
+A controller depends on exactly one application type, `ISender`. It has no `DbContext`, no
+repository, no `IQueryable`. This is not stylistic:
+
+* Business rules stay in one place. A rule enforced in a handler cannot be bypassed by a second
+  endpoint that queries the table directly.
+* Every request passes through the same pipeline, so validation, logging and transaction
+  behaviour are impossible to forget.
+* Adding a second transport - the optional gRPC service does exactly this - costs a thin adapter
+  rather than a reimplementation.
+
+== Runtime topology
+
+_Rendered version: link:diagrams/runtime.puml[`diagrams/runtime.puml`]._
+
+[listing]
+----
+                            ┌───────────────┐
+   browser / client ───────▶│      api      │───────┐
+                            │  (stateless,  │       │
+                            │   scale to N) │       │
+                            └───────┬───────┘       │
+                                    │               │
+                       reads/writes │               │ cache, security stamps,
+                                    │               │ login throttling
+                                    ▼               ▼
+                            ┌───────────────┐  ┌─────────┐
+                            │   postgres    │  │  redis  │
+                            │  aggregates   │  └─────────┘
+                            │  + outbox     │       ▲
+                            └───────┬───────┘       │ email idempotency claims
+                                    │               │
+                    polls outbox    │               │
+                    FOR UPDATE      │               │
+                    SKIP LOCKED     ▼               │
+                            ┌───────────────┐       │
+                            │    worker     │───────┘
+                            │  outbox drain │
+                            │  + consumers  │
+                            └───┬───────┬───┘
+                                │       │
+                       publishes│       │consumes
+                                ▼       ▼
+                            ┌───────────────┐        ┌──────────┐
+                            │   redpanda    │        │ mailpit  │◀── SMTP
+                            │    (kafka)    │        │  (local) │
+                            └───────────────┘        └──────────┘
+
+   migrator  ── runs once, to completion, before api and worker start:
+                schema migrations → topic creation → bootstrap administrator
+----
+
+=== Why the migrator is a separate job
+
+Running `Database.Migrate()` from API startup is the common shortcut and it breaks the moment you
+have more than one replica: several instances race to apply the same migration, and a failed
+migration takes down every instance rather than one job.
+
+Making it a run-to-completion container instead gives:
+
+* a single writer, whatever the replica count;
+* an exit code the orchestrator understands - Compose uses
+  `depends_on: condition: service_completed_successfully`, Kubernetes would use an init container
+  or a `Job`;
+* a natural home for the other bootstrap steps, which is why topic creation and the administrator
+  seed live there too.
+
+Each step is idempotent, because the migrator runs on every deploy, not just the first.
+
+=== Why the outbox processor lives in the worker
+
+Publishing is I/O against a broker that may be slow. Doing it inline would put broker latency on
+the request path, and doing it in a background thread inside the API would tie the drain rate to
+however many API replicas happen to be running. Neither is what you want. The worker scales on
+message volume; the API scales on request volume.
+
+== The transactional outbox
+
+_Rendered version: link:diagrams/outbox.puml[`diagrams/outbox.puml`]._
+
+The problem: an invite must both create a user *and* result in an email. Two systems, no shared
+transaction. Whichever you do second can fail, and you get either a user who never hears from you
+or an email for a user that does not exist.
+
+The template never publishes from a handler. Instead:
+
+[listing]
+----
+   handler                     SaveChangesAsync              worker
+   ───────                     ────────────────              ──────
+   users.Add(user)         ┌── BEGIN ───────────────┐
+   invitations.Add(inv)    │   INSERT users         │
+        │                  │   INSERT invitations   │
+        │ raises           │   INSERT outbox_messages│ ◀── interceptor drains
+        ▼ domain event     │        (same tx)        │     domain events and
+   UserInvitedDomainEvent  └── COMMIT ──────────────┘     translates them
+                                                              │
+                                          poll, FOR UPDATE SKIP LOCKED
+                                                              ▼
+                                                    publish to Kafka
+                                                              │
+                                                    mark processed_at
+----
+
+`DomainEventsToOutboxInterceptor` hooks `SavingChanges`, collects domain events off tracked
+aggregates, runs them through `IDomainEventTranslator` and adds the resulting rows. Because it is
+inside the same `SaveChanges`, the outbox row and the state change share one transaction. There is
+no window in which one exists without the other.
+
+=== Guarantees this actually buys
+
+[cols="2,3", options="header"]
+|===
+| Property | What holds
+
+| Atomicity
+| The state change and the intent to publish commit together, or neither does.
+
+| Delivery
+| *At least once.* The broker can acknowledge a message immediately before the process dies, and
+  the row is republished on the next poll.
+
+| Ordering
+| Per partition key. Every event about one user carries that user's id as the key, so events for
+  a single user stay ordered. There is no global ordering, and no attempt to fake one.
+
+| Duplicates
+| Possible, by design. Every integration event carries a stable `EventId`; consumers deduplicate.
+  The email consumer does this with a Redis idempotency claim.
+|===
+
+The honest trade is: *duplicates are possible, loss is not.* For an invitation email that is the
+right way round.
+
+=== Multiple worker replicas
+
+The drain query claims rows with `FOR UPDATE SKIP LOCKED`. Concurrent workers take disjoint
+batches without blocking each other, so the outbox scales horizontally with no leader election
+and no coordination.
+
+Rows that fail get exponential backoff via `next_attempt_at`, capped at five minutes. After
+`Outbox:MaxAttempts` they are marked `dead_lettered_at` and skipped - they stay in the table as
+the audit trail of what never got out. Successfully published rows are deleted after
+`Outbox:RetentionDays`.
+
+== Messaging
+
+=== Topic naming
+
+Every topic name is `{prefix}.{logical name}`, with the prefix from `Kafka:TopicPrefix`. Nothing
+in the code hard-codes a resolved name: producers, consumers, the provisioner and the health check
+all go through `ITopicResolver`, so a misconfigured prefix fails uniformly instead of leaving one
+side quietly listening to the wrong topic.
+
+The prefix is what lets several environments, or several tenants, share one broker.
+
+=== The catalogue
+
+`Contracts/Messaging/Topics.cs` is the single declaration of every topic and its shape. The
+migrator creates them explicitly; auto-creation is disabled on the broker, because a topic the
+broker invents gets one partition and the broker's default retention, which is almost never right.
+
+[cols="3,1,2,3", options="header"]
+|===
+| Topic | Parts | Retention | Produced when
+
+| `{prefix}.user.invited`           | 3 | 7d  | A user is invited, or an invitation is resent
+| `{prefix}.user.activated`         | 3 | 7d  | An invitee accepts and sets a password
+| `{prefix}.user.suspended`         | 3 | 7d  | An account is suspended
+| `{prefix}.user.reinstated`        | 3 | 7d  | A suspended account is restored
+| `{prefix}.user.roles-changed`     | 3 | 7d  | A user's roles actually change
+| `{prefix}.invitation.revoked`     | 3 | 7d  | A pending invitation is cancelled
+| `{prefix}.email.requested`        | 6 | 7d  | Any consumer decides an email should be sent
+| `{prefix}.email.requested.dlq`    | 1 | 30d | An email exhausts its retries
+|===
+
+=== Why email is a second hop
+
+A consumer of `user.invited` does not send the email. It publishes `email.requested`, and a
+separate consumer sends it. That separation pays for itself:
+
+* A broken SMTP server backs up one topic instead of stalling user events.
+* The email topic can be replayed on its own once the transport recovers.
+* Every feature that needs to send mail produces the same event and gets retries, dead-lettering
+  and deduplication for free.
+* `email.requested` has six partitions rather than three, because sending is the slow step and
+  benefits from more parallelism.
+
+=== Consumer semantics
+
+Auto-commit is off. Offsets are stored only after the handler returns, so a crash mid-handle
+replays the message - *handlers must be idempotent*, and the email handler is, via its Redis
+claim.
+
+Each consumer runs in its own consumer group (`{group}.{suffix}`). Consumers sharing a group would
+split the partitions between them and each see only part of the traffic, which is a genuinely
+confusing bug to diagnose; separate groups make it structurally impossible.
+
+Failures retry in process with exponential backoff up to `Kafka:MaxDeliveryAttempts`, then go to
+the dead-letter topic with the reason in the headers. The offset is committed either way - not
+committing would replay a poison message forever and stall the partition.
+
+Deserialization failures skip retries entirely: a payload that cannot be parsed will not parse on
+the fourth attempt either.
+
+== Security architecture
+
+[cols="2,3", options="header"]
+|===
+| Concern | Approach
+
+| Passwords
+| bcrypt, work factor 12. The factor is embedded in the hash, so raising it later still verifies
+  old hashes and `NeedsRehash` upgrades them on the next successful sign-in.
+
+| Access tokens
+| HS256 JWT, 15 minutes. Short because the refresh token is what carries long sessions.
+
+| Refresh tokens
+| 48 bytes of entropy, stored only as a SHA-256 hash, rotated on every use. Presenting an
+  already-rotated token revokes the whole chain descended from that login - see below.
+
+| Immediate revocation
+| Each token carries a security stamp. Suspension, role change and password change bump it, and
+  the API compares the token's stamp against the current one on every request. Without this a
+  suspended user keeps working until their access token expires.
+
+| Enumeration
+| Login always returns the same error and costs the same time whether or not the address exists -
+  the hasher verifies against a dummy hash when there is no user. Invitation lookups return one
+  opaque error for unknown, used and expired tokens alike.
+
+| Throttling
+| Per-IP fixed window on credential endpoints, per-user token bucket elsewhere, plus a per-address
+  failed-login counter in Redis.
+
+| Invitation tokens
+| 32 bytes of entropy, single use, time limited, stored only as a hash. Resending rotates the
+  secret, so the link already sitting in a mailbox stops working.
+
+| Link building
+| Every URL in an email comes from `App:PublicBaseUrl`, never from the request's `Host` header,
+  which an attacker controls.
+
+| Container
+| Non-root user, read-only root filesystem, `no-new-privileges`, application files owned by root
+  and mode 555.
+|===
+
+=== Refresh token reuse detection
+
+Rotation alone does not tell you when a token has been stolen. Chaining does.
+
+[listing]
+----
+   login ──▶ T1 ──rotate──▶ T2 ──rotate──▶ T3        all share one ChainId
+
+   attacker replays T1
+        │
+        ▼
+   T1 is not active  ──▶  revoke every active token in the chain
+        │
+        ▼
+   both the attacker and the real user are signed out, and the event is logged
+----
+
+Signing the legitimate user out is a deliberate choice: a visible, recoverable interruption is
+better than an attacker quietly holding a valid session.
+
+== Failure modes
+
+[cols="2,3,2", options="header"]
+|===
+| What fails | What happens | What you should do
+
+| PostgreSQL unavailable
+| API readiness fails, liveness still passes so the pod is not killed. Writes fail with 503.
+| Alert on `/health/ready`.
+
+| Redis unavailable
+| Degrades, does not break. Cache reads fall through to the database, writes are dropped, and
+  email idempotency claims are granted - a duplicate email beats a lost one.
+| Alert; latency will rise.
+
+| Kafka unavailable
+| Requests still succeed. Outbox rows accumulate and drain when the broker returns.
+| Alert on outbox depth, not on request errors.
+
+| SMTP unavailable
+| `email.requested` backs up. User events keep flowing.
+| Alert on consumer lag for the email group.
+
+| A message is poison
+| Retries with backoff, then the dead-letter topic with the reason in the headers.
+| Alert on any traffic to `*.dlq`.
+
+| Outbox row exhausts retries
+| Marked `dead_lettered_at`, skipped, retained.
+| `SELECT * FROM outbox_messages WHERE dead_lettered_at IS NOT NULL` - this needs a human.
+
+| Two workers poll at once
+| Nothing. `SKIP LOCKED` gives them disjoint batches.
+| Nothing.
+
+| Migrator fails
+| Exits non-zero; the API and worker never start.
+| Read its logs. This is intentional - a half-migrated schema is worse than no start.
+|===
+
+== Scaling
+
+[cols="2,3", options="header"]
+|===
+| Component | How it scales
+
+| `api`
+| Stateless; scale horizontally. Sessions live in Postgres and Redis, never in memory. Note that
+  the in-process rate limiter is per instance, so N replicas allow N times the configured rate -
+  put a shared limiter at the edge.
+
+| `worker`
+| Horizontally, to the partition count. The outbox drain is safe at any replica count thanks to
+  `SKIP LOCKED`; consumer parallelism is bounded by partitions per topic.
+
+| `postgres`
+| Vertically first. The read side already projects to DTOs with no tracking, so read replicas are
+  a contained change: point `IUserReadRepository` at a second context.
+
+| `redis`
+| Rarely the bottleneck here - it holds cache entries, security stamps and idempotency claims,
+  all small and all short-lived.
+|===
+
+== Observability
+
+* *Logs* - Serilog, structured, with a correlation id pushed into the log context by
+  `CorrelationIdMiddleware`. An inbound `X-Correlation-Id` is honoured and echoed, so a trace
+  spans services. Hot paths use the `[LoggerMessage]` source generator rather than the extension
+  methods, so a disabled level costs nothing.
+* *Traces and metrics* - OpenTelemetry for ASP.NET Core, HttpClient, Npgsql and the runtime.
+  The OTLP exporter is wired only when `Otlp:Endpoint` is set, so local development needs no
+  collector.
+* *Health* - `/health/live` deliberately checks nothing external; a Postgres blip must not cause
+  a restart loop. `/health/ready` checks Postgres, Redis and Kafka, and is what a load balancer
+  should watch.
+* *Request logs* - health probes are logged at Verbose so they do not drown the signal.
+
+== Decisions worth knowing about
+
+[cols="2,3,3", options="header"]
+|===
+| Decision | Why | What it costs
+
+| Hand-rolled dispatcher rather than MediatR
+| MediatR moved to a commercial licence. The replacement is ~60 lines, has no licensing question,
+  and is small enough to read in one sitting.
+| No ecosystem of pre-built behaviours; you write your own.
+
+| Outbox rather than publishing from handlers
+| Removes the dual-write problem entirely.
+| Publish latency of up to one poll interval, and a table to keep tidy.
+
+| Result type rather than exceptions for expected failures
+| "Email already in use" is an outcome, not an exception. Handlers return it, one place maps it
+  to a status code, and nothing depends on stack unwinding for control flow.
+| More verbose than throwing.
+
+| Roles as a Postgres `text[]`
+| Roles are a small set, always loaded with the user, and never queried independently. A join
+  table would add a query for no benefit.
+| Awkward if roles ever grow attributes; that would be the moment to normalise.
+
+| bcrypt rather than Argon2id
+| Ships in a well-maintained package, no native dependency, and is comfortably strong at cost 12.
+| Argon2id is the stronger modern choice if you are willing to take the dependency.
+
+| Redpanda rather than Kafka locally
+| One container, no ZooKeeper, seconds to start, wire compatible.
+| Production still runs whatever your platform provides; the client code does not change.
+
+| Separate `Contracts` project
+| The wire format is a published interface. Keeping it out of `Domain` stops an internal refactor
+  from silently becoming a breaking change for consumers.
+| One more project.
+|===

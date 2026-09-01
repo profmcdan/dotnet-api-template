@@ -1,0 +1,326 @@
+= Template usage
+:toc: macro
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+How to install this repository as a `dotnet new` template on macOS and Windows, and how to
+generate a new project from it.
+
+If you only want to *run* this repository rather than reuse it, see
+link:install.adoc[Installation].
+
+toc::[]
+
+== What "installing the template" means
+
+`dotnet new` templates are just folders containing a `.template.config/template.json`. Installing
+one registers it with the SDK; it does not copy anything into your projects. Generating from it
+copies the folder, renames `CleanArchTemplate` to your project name throughout, substitutes the
+parameter values and strips the optional pieces you turned off.
+
+== Prerequisites
+
+Only the .NET 10 SDK is needed to install and generate. Docker is needed to *run* what you
+generate - see link:install.adoc#_prerequisites[Installation].
+
+[source,bash]
+----
+dotnet --version    # 10.0.x or later
+----
+
+== Install
+
+=== macOS and Linux
+
+[source,bash]
+----
+git clone <this-repository-url> ~/src/dotnet-template
+dotnet new install ~/src/dotnet-template
+----
+
+=== Windows
+
+PowerShell:
+
+[source,powershell]
+----
+git clone <this-repository-url> $HOME\src\dotnet-template
+dotnet new install $HOME\src\dotnet-template
+----
+
+=== Confirm
+
+[source,bash]
+----
+dotnet new list cleanapi
+----
+
+[listing]
+----
+Template Name                                        Short Name  Language  Tags
+---------------------------------------------------  ----------  --------  --------------------------
+Clean Architecture Web API (Postgres, Kafka, Redis)  cleanapi    [C#]      Web/WebAPI/Clean Arch/…
+----
+
+[TIP]
+====
+Installing from a local path registers the path, not a snapshot. Pull the repository and the
+installed template updates with it - handy while you are still adjusting it. To pin a version
+instead, publish it as a NuGet package (see <<Distributing to a team>>).
+====
+
+== Generate a project
+
+[source,bash]
+----
+mkdir -p ~/src/acme-billing && cd ~/src/acme-billing
+dotnet new cleanapi -n Acme.Billing --kafka-topic-prefix billing --allow-grpc
+----
+
+That produces `Acme.Billing/` with every project, namespace, assembly and the solution renamed,
+`billing` as the topic prefix, and the gRPC surface included. It restores automatically.
+
+[source,bash]
+----
+cd Acme.Billing
+cp .env.sample .env      # edit JWT__SIGNINGKEY and the passwords
+docker compose up -d
+----
+
+== Parameters
+
+[cols="2,1,1,4", options="header"]
+|===
+| Parameter | Alias | Default | Effect
+
+| `-n, --name`
+| |_directory_
+| Renames the solution, all seven projects, every namespace and every assembly. `Acme.Billing`
+  gives you `Acme.Billing.Domain`, `Acme.Billing.Api` and so on.
+
+| `--allow-grpc`
+| `-g` | `false`
+| Adds `Grpc.AspNetCore`, the `Protos/users.proto` contract and `UsersGrpcService`, and maps the
+  service plus reflection in Development. When off, those files and package references are
+  removed entirely rather than left behind disabled.
+
+| `--kafka-topic-prefix`
+| `-k` | `cleanarch`
+| Replaces the prefix everywhere it appears: topic names, the consumer group id, the Redis key
+  namespace and the Compose project name. Topics become `billing.user.invited` and so on.
+
+| `--api-port`
+| `-p` | `5080`
+| The host port Compose publishes the API on, and the URL in `launchSettings.json`.
+
+| `--database-name`
+| `-d` | `appdb`
+| PostgreSQL database name in `.env.sample`, `compose.yml` and the design-time factory fallback.
+
+| `--include-tests`
+| `-t` | `true`
+| Include `tests/`. Turning this off is rarely a good idea.
+
+| `--include-docs`
+| | `true`
+| Include `docs/`.
+
+| `--skip-restore`
+| | `false`
+| Skip the automatic restore after generation.
+|===
+
+Every parameter has a default, so `dotnet new cleanapi -n MyService` on its own works.
+
+=== Choosing a topic prefix
+
+The prefix is what lets several services or environments share one broker without colliding. Use
+something that identifies the *service*, not the environment - environments are usually separated
+by cluster or by an additional prefix segment supplied at deploy time through
+`KAFKA__TOPICPREFIX`.
+
+[source,bash]
+----
+--kafka-topic-prefix billing     # billing.user.invited
+--kafka-topic-prefix acme.crm    # acme.crm.user.invited
+----
+
+The value is read from configuration at runtime, so you can still override it per environment
+later without regenerating.
+
+=== Turning gRPC on afterwards
+
+The template strips gRPC when it is off, so switching later is a manual change rather than a flag.
+It is small:
+
+. Add `Grpc.AspNetCore`, `Grpc.AspNetCore.Server.Reflection`, `Grpc.Tools` and `Google.Protobuf`
+  to `Directory.Packages.props` and reference the first two from the API project.
+. Add a `<Protobuf Include="Protos\*.proto" GrpcServices="Server" />` item.
+. Copy `Protos/users.proto` and `Grpc/UsersGrpcService.cs` from this repository.
+. In `Program.cs`, add `AddGrpc()` / `AddGrpcReflection()` and `MapGrpcService<UsersGrpcService>()`.
+
+Generating a throwaway project with `--allow-grpc` and diffing is the quickest way to get it
+exactly right.
+
+== After generating
+
+[cols="1,4", options="header"]
+|===
+| | Step
+
+| 1
+| `cp .env.sample .env` and set `JWT__SIGNINGKEY` (`openssl rand -base64 48`), `POSTGRES_PASSWORD`
+  and the seed administrator credentials.
+
+| 2
+| Set `APP__PUBLICBASEURL` to your front end. Every link in every email is built from it.
+
+| 3
+| `docker compose up -d`, then confirm the invite flow through Mailpit at http://localhost:8025.
+
+| 4
+| `dotnet test` - all three projects should be green before you write any of your own code.
+
+| 5
+| Replace the sample domain with yours. `User` and `Invitation` are meant to stay; they are the
+  user-management feature, not a demo.
+
+| 6
+| Rename the email `FromDisplayName`, `SupportUrl` and the templates under
+  `Infrastructure/Notifications/Templates`.
+
+| 7
+| `git init && git add . && git commit`. `.gitignore` already excludes `.env`.
+|===
+
+Before the first real deployment, work through the
+link:../README.adoc#_before_you_ship[Before you ship] checklist.
+
+== Managing the installed template
+
+[source,bash]
+----
+dotnet new list                          # everything installed
+dotnet new uninstall                     # what is installed, and how to remove each
+dotnet new uninstall ~/src/dotnet-template
+dotnet new install ~/src/dotnet-template --force   # reinstall after editing template.json
+----
+
+`--force` is what you want whenever you change `.template.config/template.json`; the SDK caches
+the manifest.
+
+== Changing the template itself
+
+The template is the repository. Edit the code, and the next generated project has your change.
+
+Things worth knowing before you edit `template.json`:
+
+* *`sourceName` is `CleanArchTemplate`.* Every occurrence, in file names and file contents, is
+  replaced with `-n`. Do not use that string for anything you do not want renamed.
+* *Symbol replacement is literal.* `KafkaTopicPrefix` replaces the exact lowercase string
+  `cleanarch`. That is why the Compose services are named `postgres` and `redis` rather than
+  `cleanarch-postgres` - so a prefix change does not rename containers as a side effect.
+* *Conditional blocks use the file's comment syntax.* `//#if (AllowGrpc)` … `//#endif` in C#,
+  `<!--#if (AllowGrpc) -->` … `<!--#endif -->` in `.csproj` and `.props`.
+* *Whole files are excluded with `sources[0].modifiers`,* not with conditionals. That is how the
+  `Grpc/` and `Protos/` folders disappear.
+
+Always test both sides of a boolean:
+
+[source,bash]
+----
+dotnet new install . --force
+cd $(mktemp -d)
+dotnet new cleanapi -n WithGrpc --allow-grpc     && dotnet build WithGrpc/WithGrpc.slnx
+dotnet new cleanapi -n WithoutGrpc               && dotnet build WithoutGrpc/WithoutGrpc.slnx
+----
+
+Then grep the output for leftovers - a missed `#endif` or an unreplaced token shows up
+immediately:
+
+[source,bash]
+----
+grep -rIn "CleanArchTemplate\|cleanarch" WithoutGrpc --exclude-dir=obj --exclude-dir=bin
+----
+
+== Distributing to a team
+
+Local-path installs are fine for one person. For a team, package it.
+
+Add `CleanArchTemplate.Template.csproj` next to the solution:
+
+[source,xml]
+----
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageType>Template</PackageType>
+    <PackageId>Acme.Templates.CleanApi</PackageId>
+    <Version>1.0.0</Version>
+    <Title>Acme Clean Architecture Web API</Title>
+    <Authors>Acme Platform</Authors>
+    <Description>Clean architecture Web API with Postgres, Kafka, Redis and Docker.</Description>
+    <TargetFramework>net10.0</TargetFramework>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="**\*" Exclude="**\bin\**;**\obj\**;**\.git\**;**\.env;**\.data\**" />
+    <Compile Remove="**\*" />
+  </ItemGroup>
+</Project>
+----
+
+[source,bash]
+----
+dotnet pack CleanArchTemplate.Template.csproj -o ./artifacts
+dotnet nuget push ./artifacts/Acme.Templates.CleanApi.1.0.0.nupkg --source <your-feed> --api-key <key>
+----
+
+Then anyone on the team:
+
+[source,bash]
+----
+dotnet new install Acme.Templates.CleanApi
+dotnet new cleanapi -n Acme.Billing --kafka-topic-prefix billing
+----
+
+Versioning the package means a team can pin a known-good template, and `dotnet new install
+Acme.Templates.CleanApi::1.2.0` gets a specific one.
+
+== Troubleshooting
+
+[cols="2,3", options="header"]
+|===
+| Symptom | Cause and fix
+
+| `No templates found matching: 'cleanapi'`
+| Not installed, or installed from a path that has since moved. `dotnet new uninstall` lists what
+  is registered.
+
+| Changes to `template.json` have no effect
+| The manifest is cached. `dotnet new install . --force`.
+
+| Generated project still contains `CleanArchTemplate`
+| A file type the engine does not treat as text, or a path excluded from replacement. Check the
+  `exclude` list in `sources[0]`.
+
+| `bin/` and `obj/` end up in the generated project
+| You generated from a repository that had been built and the exclude list is not matching. The
+  defaults cover `**/[Bb]in/**` and `**/[Oo]bj/**`; run `git clean -xdn` to see what else is lying
+  around.
+
+| gRPC files remain with `--allow-grpc` off
+| The `modifiers` condition and the folder path must match exactly, including the project prefix
+  which is renamed *after* exclusion is evaluated - keep the pattern on the `CleanArchTemplate.*`
+  name.
+
+| Restore fails immediately after generating
+| Usually an offline feed or a private source in a parent-directory `NuGet.config`. Generate with
+  `--skip-restore` and run `dotnet restore` yourself to see the real error.
+|===

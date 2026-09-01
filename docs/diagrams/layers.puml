@@ -1,0 +1,46 @@
+@startuml layers
+title CleanArchTemplate — layers and the dependency rule
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+
+package "Presentation" {
+  [Api\ncontrollers · auth · rate limiting\nOpenAPI · optional gRPC] as Api
+  [Migrator\nmigrations · topics · admin seed] as Migrator
+  [Worker\noutbox drain · consumers · jobs] as Worker
+}
+
+package "Core" {
+  [Application\ncommands · queries · handlers\nbehaviours · ports] as Application
+  [Domain\naggregates · value objects\ndomain events · invariants] as Domain
+  [Contracts\nintegration events · topics] as Contracts
+}
+
+package "Adapters" {
+  [Infrastructure\nEF Core · Kafka · Redis\nJWT · SMTP · outbox] as Infrastructure
+}
+
+Api --> Application
+Api --> Infrastructure
+Migrator --> Infrastructure
+Worker --> Infrastructure
+
+Infrastructure --> Application : implements ports
+Application --> Domain
+Application --> Contracts
+Infrastructure ..> Contracts
+
+note right of Domain
+  No dependencies at all.
+  Testable without a database,
+  a broker or a web host.
+end note
+
+note bottom of Infrastructure
+  Depends inward on Application
+  and supplies the adapters for
+  the ports it declares.
+end note
+
+@enduml

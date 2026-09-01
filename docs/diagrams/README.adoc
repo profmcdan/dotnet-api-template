@@ -1,0 +1,31 @@
+= Diagrams
+
+The documentation carries ASCII diagrams inline so it reads correctly anywhere, with no toolchain.
+These PlantUML sources are the higher-fidelity versions of the same pictures, for slides or a
+rendered docs site.
+
+== Rendering
+
+[source,bash]
+----
+# macOS
+brew install plantuml
+plantuml -tsvg docs/diagrams/*.puml
+
+# anywhere with Docker
+docker run --rm -v "$PWD:/work" -w /work plantuml/plantuml -tsvg docs/diagrams/*.puml
+----
+
+Output lands beside the sources as `.svg`. `docs/**/*.html` and generated images are git-ignored;
+commit the `.puml` sources, not the renders.
+
+[cols="2,3", options="header"]
+|===
+| File | Shows
+
+| `layers.puml`        | The four layers and the dependency rule
+| `runtime.puml`       | Containers, what talks to what, and the startup ordering
+| `invite-flow.puml`   | The invite → outbox → Kafka → email → accept sequence
+| `outbox.puml`        | How one transaction produces both a state change and a message
+| `domain-model.puml`  | Aggregates, entities and their relationships
+|===

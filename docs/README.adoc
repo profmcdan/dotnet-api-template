@@ -1,0 +1,49 @@
+= Documentation
+:icons: font
+
+Index for `docs/`. The project overview and quick start live in the
+link:../README.adoc[root README].
+
+[cols="1,3", options="header"]
+|===
+| Document | Read it when you want to
+
+| link:architecture.adoc[architecture.adoc]
+| Understand the system: the layer model and dependency rule, the runtime topology, the
+  transactional outbox, messaging topology and delivery guarantees, the security architecture,
+  failure modes, scaling, and the decisions behind all of it.
+
+| link:design.adoc[design.adoc]
+| Work inside the code: the domain model and its invariants, the `Result` and error model, the
+  hand-rolled dispatcher and its behaviours, authentication design, caching and invalidation,
+  persistence details, and recipes for adding a command, an event, a consumer or an email
+  template.
+
+| link:install.adoc[install.adoc]
+| Run it: prerequisites for macOS and Windows, configuration, the Compose stack, running without
+  Docker, EF migrations, tests, and a troubleshooting table.
+
+| link:template-usage.adoc[template-usage.adoc]
+| Reuse it: install the `dotnet new` template on macOS or Windows, generate a project, what each
+  parameter changes, editing the template itself, and packaging it for a team.
+
+| link:diagrams/README.adoc[diagrams/]
+| PlantUML sources for the diagrams that appear as ASCII art in the documents above, and how to
+  render them.
+|===
+
+== Reading order
+
+New to the project::
+link:install.adoc[install.adoc] to get it running, then
+link:architecture.adoc[architecture.adoc] to understand what you just started.
+
+About to write a feature::
+link:design.adoc#_recipes[design.adoc → Recipes].
+
+Starting a new service from this::
+link:template-usage.adoc[template-usage.adoc].
+
+On call::
+link:architecture.adoc#_failure_modes[architecture.adoc → Failure modes] and
+link:install.adoc#_troubleshooting[install.adoc → Troubleshooting].

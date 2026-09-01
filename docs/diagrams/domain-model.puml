@@ -1,0 +1,99 @@
+@startuml domain-model
+title Domain model
+
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+hide empty members
+
+class User <<aggregate root>> {
+  +Guid Id
+  +Email Email
+  +string FullName
+  +UserStatus Status
+  -string? PasswordHash
+  +int SecurityStamp
+  +IReadOnlyList<string> Roles
+  --
+  +Invite()
+  +Activate()
+  +ChangePassword()
+  +ChangeRoles()
+  +Suspend() / Reinstate()
+}
+
+class Email <<value object>> {
+  +string Value
+  +Create() : Result<Email>
+}
+
+enum UserStatus {
+  Invited
+  Active
+  Suspended
+}
+
+class Invitation <<aggregate root>> {
+  +Guid Id
+  +Guid UserId
+  +string TokenHash
+  +DateTimeOffset ExpiresAt
+  +InvitationStatus Status
+  +int SendCount
+  --
+  +Accept()
+  +Revoke()
+  ~Refresh()
+}
+
+class InvitationToken <<value object>> {
+  +string Raw
+  +string Hash
+  +Issue()
+}
+
+enum InvitationStatus {
+  Pending
+  Accepted
+  Revoked
+}
+
+class RefreshToken <<entity>> {
+  +Guid Id
+  +Guid UserId
+  +string TokenHash
+  +Guid ChainId
+  +Guid? ReplacedByTokenId
+  --
+  +Issue()
+  +Rotate()
+  +MarkReused()
+}
+
+class UserInvitationService <<domain service>> {
+  +Invite() : Result<IssuedInvitation>
+  +Resend() : Result<InvitationToken>
+}
+
+User *-- Email
+User -- UserStatus
+Invitation -- InvitationStatus
+Invitation ..> InvitationToken : hashes
+User "1" -- "0..*" Invitation : UserId
+User "1" -- "0..*" RefreshToken : UserId
+UserInvitationService ..> User
+UserInvitationService ..> Invitation
+
+note bottom of UserInvitationService
+  Owns the invariants that span both
+  aggregates: a pending invitation always
+  has exactly one invited user, and the raw
+  token exists only in the emitted event.
+end note
+
+note right of RefreshToken
+  ChainId groups every token descended
+  from one login, so presenting a rotated
+  token revokes the whole family.
+end note
+
+@enduml
