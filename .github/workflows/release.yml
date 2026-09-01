@@ -17,6 +17,10 @@ name: release
 #      Settings -> Secrets and variables -> Actions -> Variables.
 #
 # Without these the first step fails with a clear message and nothing is published.
+#
+# NOTE: a tag-triggered run uses THIS FILE AS IT EXISTS IN THE TAGGED COMMIT. Editing it on a
+# branch does not affect an existing tag, and re-running a failed job replays the old definition.
+# After changing this file, delete and re-cut the tag - see docs/template-usage.adoc.
 
 on:
   push:

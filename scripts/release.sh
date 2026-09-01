@@ -36,7 +36,14 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "Not a git repository."
 [ -z "$(git status --porcelain)" ] || die "The working tree has uncommitted changes. Commit or stash them first."
 
 if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-  die "Tag v$VERSION already exists. Delete it first: git tag -d v$VERSION && git push --delete origin v$VERSION"
+  die "Tag v$VERSION already exists.
+
+  A tag-triggered workflow runs the workflow file as it exists in the tagged commit, so fixing
+  the workflow on a branch does nothing until the tag moves. If nothing was published, deleting
+  and re-cutting the tag is safe:
+
+    git tag -d v$VERSION && git push --delete origin v$VERSION
+    ./scripts/release.sh $VERSION"
 fi
 
 CURRENT=$(dotnet msbuild tools/DotnetApiTemplate.Cli/DotnetApiTemplate.Cli.csproj -getProperty:Version -nologo | tr -d '[:space:]')
@@ -77,9 +84,17 @@ info "Running tests"
 dotnet test CleanArchTemplate.slnx --nologo --verbosity quiet
 dotnet test tools/DotnetApiTemplate.slnx --nologo --verbosity quiet
 
-info "Committing and tagging"
-git add "$PROPS"
-git commit --quiet --message "chore: release $VERSION"
+# Re-tagging the same version is a normal thing to do after fixing a CI bug: the version file
+# is already correct, so there is nothing to commit and we just move the tag onto the fix.
+if git diff --quiet -- "$PROPS"; then
+  info "Version is already $VERSION; tagging the current commit"
+else
+  info "Committing"
+  git add "$PROPS"
+  git commit --quiet --message "chore: release $VERSION"
+fi
+
+info "Tagging v$VERSION at $(git rev-parse --short HEAD)"
 git tag --annotate "v$VERSION" --message "Release $VERSION"
 
 echo

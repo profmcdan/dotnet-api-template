@@ -467,19 +467,47 @@ git tag -a v1.1.0 -m "Release 1.1.0"
 git push origin HEAD --follow-tags
 ----
 
-==== Recovering from a mismatched tag
+==== Fixing a failed release
 
-If the workflow fails with a version mismatch, the tag was pushed without the matching bump.
-Delete it and cut the release properly — nothing was published, so this is safe:
+[IMPORTANT]
+====
+A tag-triggered workflow runs the workflow file **as it exists in the tagged commit** — not the
+one on your branch. Fixing `.github/workflows/release.yml` and pushing it does nothing for an
+existing tag, and re-running the failed job just replays the old definition. The tag has to move.
+====
+
+That is the usual reason a release keeps failing in exactly the same way after you have already
+fixed the cause. Check what the tag actually contains:
+
+[source,bash]
+----
+git show v1.1.0^{commit}:.github/workflows/release.yml | grep -n "api-key\|NuGet/login"
+----
+
+Nothing is published until the push step succeeds, so deleting and re-cutting the tag is safe:
 
 [source,bash]
 ----
 git tag -d v1.1.0
 git push --delete origin v1.1.0
 
-./scripts/release.sh 1.1.0
+./scripts/release.sh 1.1.0          # moves the tag onto the fix; no re-bump needed
 git push origin HEAD --follow-tags
 ----
+
+`release.sh` handles this: when the version file is already correct it skips the commit and just
+tags the current commit.
+
+[NOTE]
+====
+The tag must point at a commit that contains the fix. If you work on a branch, make sure that
+branch is pushed and that `HEAD` is on it when you re-cut the tag.
+====
+
+===== A mismatched version
+
+If the workflow failed on the version check instead, the tag was pushed without the matching
+bump. Same remedy — delete the tag and let `release.sh` cut it properly.
 
 === Publishing by hand
 
@@ -587,8 +615,11 @@ Without it NuGet silently drops `.template.config/`, `.gitignore`, `.editorconfi
   `Directory.Packaging.props`.
 
 | The release workflow fails on the version check
-| The tag was pushed without the matching version bump. See
-  <<Recovering from a mismatched tag>>. Using `./scripts/release.sh` avoids it entirely.
+| The tag was pushed without the matching version bump. See <<Fixing a failed release>>.
+  Using `./scripts/release.sh` avoids it entirely.
+
+| A workflow fix has no effect; the release fails identically every time
+| Tag-triggered runs use the workflow file from the tagged commit. See <<Fixing a failed release>>.
 
 | No *Trusted Publishing* option in the nuget.org account menu
 | Still rolling out. Use <<If Trusted Publishing is not available yet>> in the meantime.
