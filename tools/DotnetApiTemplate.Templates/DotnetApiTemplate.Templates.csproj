@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="$(MSBuildThisFileDirectory)../../Directory.Packaging.props" />
+
+  <!--
+    The same template as a plain `dotnet new` package, for anyone who would rather not install a
+    global tool - CI images, or somewhere global tools are discouraged:
+
+      dotnet new install ProfmcdanDotnetApiTemplate.Templates
+      dotnet new cleanapi -n Acme.Billing
+
+    What you give up compared with the CLI: name validation with a readable message, the generated
+    .env secrets, and the initial commit.
+  -->
+  <PropertyGroup>
+    <PackageId>$(PackageIdPrefix).Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <Title>Clean Architecture Web API template</Title>
+    <Description>A `dotnet new` template for a clean-architecture ASP.NET Core Web API with JWT user management, an invite-by-email flow over Kafka, a transactional outbox, EF Core on PostgreSQL, Redis, a migrator job, background workers and Docker Compose.</Description>
+    <PackageTags>dotnet-new;templates;clean-architecture;webapi;cqrs;kafka;postgres;redis;docker</PackageTags>
+
+    <!-- A template package carries content only: no assembly, no dependencies. -->
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+
+    <!-- NU5128: no lib/ folder, which is correct and expected for a template package. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="@(TemplatePayload)"
+             PackagePath="content\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <Compile Remove="**\*" />
+  </ItemGroup>
+
+</Project>

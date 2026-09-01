@@ -85,9 +85,41 @@ and fail with `no such file or directory`. Set `core.autocrlf=input`, or work in
 == Install the CLI
 
 The tool carries the project template inside it, so this is the only thing you install. There is
-no separate template package to manage.
+no separate template package to manage and no repository to clone.
 
-=== macOS and Linux
+=== From NuGet
+
+[source,bash]
+----
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli
+----
+
+To upgrade later:
+
+[source,bash]
+----
+dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli
+----
+
+To pin a version — worth doing on a team, so everyone scaffolds the same thing:
+
+[source,bash]
+----
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli --version 1.0.0
+----
+
+Identical on macOS, Linux and Windows.
+
+[NOTE]
+====
+This works once the package has been published. Until the first release lands on nuget.org, use
+<<From source>> below. Publishing is a tagged commit away — see
+link:template-usage.adoc#_publishing_to_nuget[Publishing to NuGet].
+====
+
+=== From source
+
+Use this to work on the template itself, or before the first release is published.
 
 [source,bash,subs="attributes"]
 ----
@@ -96,21 +128,7 @@ cd dotnet-api-template
 ./scripts/install.sh
 ----
 
-Or without cloning first:
-
-[source,bash,subs="attributes"]
-----
-curl -fsSL {repo}/raw/main/scripts/install.sh | bash
-----
-
-[NOTE]
-====
-The piped form clones into `~/.dotnet-api-template/src` and builds from there. Read the script
-before piping it to a shell if that is not a habit you are comfortable with — the clone-then-run
-form above does exactly the same work and lets you look first.
-====
-
-=== Windows
+On Windows:
 
 [source,powershell,subs="attributes"]
 ----
@@ -121,20 +139,42 @@ cd dotnet-api-template
 
 Or without cloning first:
 
+[source,bash,subs="attributes"]
+----
+curl -fsSL {repo}/raw/main/scripts/install.sh | bash
+----
+
 [source,powershell,subs="attributes"]
 ----
 irm {repo}/raw/main/scripts/install.ps1 | iex
 ----
 
-=== What the installer does
+[NOTE]
+====
+The piped form clones into `~/.dotnet-api-template/src` and builds from there. Read the script
+before piping it to a shell if that is not a habit you are comfortable with — the clone-then-run
+form does exactly the same work and lets you look first.
+====
 
-. Checks for the .NET SDK 10 or later.
-. Builds `tools/DotnetApiTemplate.Cli` and packs it as a .NET global tool.
-. Installs that tool as `dotnet-api-template`.
-. Registers the bundled project template with the SDK under the short name `cleanapi`.
+The script checks for the .NET SDK 10 or later, packs `tools/DotnetApiTemplate.Cli` as a global
+tool, installs it as `dotnet-api-template`, and registers the bundled template with the SDK. It
+uninstalls any previous copy first, so re-running it always lands the build you just made rather
+than silently keeping an older one.
 
-It uninstalls any previous copy first, so re-running it always lands the build you just made
-rather than silently keeping an older one.
+=== Without a global tool
+
+If global tools are awkward where you work — a locked-down CI image, say — install the template
+package on its own and use `dotnet new` directly:
+
+[source,bash]
+----
+dotnet new install ProfmcdanDotnetApiTemplate.Templates
+dotnet new cleanapi -n Acme.Billing --allow-grpc --kafka-topic-prefix billing
+----
+
+Same template, same output. What you give up is the CLI's name validation, the generated `.env`
+secrets and the initial commit — see link:template-usage.adoc#_the_raw_dotnet_new_route[the raw
+`dotnet new` route].
 
 === Confirm the install
 
@@ -147,7 +187,7 @@ dotnet-api-template info
 ----
   dotnet-api-template  1.0.0
   template short name  cleanapi
-  template location    ~/.dotnet/tools/.store/dotnetapitemplate.cli/1.0.0/…/template
+  template location    ~/.dotnet/tools/.store/profmcdandotnetapitemplate.cli/1.0.0/…/template
   template present     yes
 
   .NET SDK             10.0.201
@@ -461,11 +501,20 @@ dotnet test Acme.Billing.slnx --collect:"XPlat Code Coverage"
 
 == Update or remove the CLI
 
+Installed from NuGet:
+
+[source,bash]
+----
+dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli      # update
+dotnet tool uninstall --global ProfmcdanDotnetApiTemplate.Cli   # remove
+----
+
+Installed from source:
+
 [source,bash]
 ----
 cd ~/.dotnet-api-template/src && git pull && ./scripts/install.sh   # update
-dotnet-api-template update                                          # re-register the template only
-./scripts/uninstall.sh                                              # remove everything
+./scripts/uninstall.sh                                             # remove
 ----
 
 On Windows, re-run `.\scripts\install.ps1` to update, and to remove:
@@ -473,10 +522,14 @@ On Windows, re-run `.\scripts\install.ps1` to update, and to remove:
 [source,powershell]
 ----
 dotnet-api-template uninstall-template
-dotnet tool uninstall --global DotnetApiTemplate.Cli
+dotnet tool uninstall --global ProfmcdanDotnetApiTemplate.Cli
 ----
 
-Updating the CLI does not touch projects you have already generated.
+`dotnet-api-template update` on its own only re-registers the bundled template with the SDK. It
+does not fetch a newer template — the template ships inside the tool, so upgrading the tool is what
+upgrades the template.
+
+Updating the CLI never touches projects you have already generated.
 
 == Troubleshooting
 
@@ -486,6 +539,13 @@ Updating the CLI does not touch projects you have already generated.
 
 | `dotnet-api-template: command not found`
 | `~/.dotnet/tools` is not on your `PATH`. See <<Confirm the install>>.
+
+| `ProfmcdanDotnetApiTemplate.Cli is not found in NuGet feeds`
+| The package has not been published yet, or your feed list does not include nuget.org. Install
+  <<From source>> instead, or check `dotnet nuget list source`.
+
+| `Tool 'profmcdandotnetapitemplate.cli' is already installed`
+| Use `dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli`, or uninstall first.
 
 | `The bundled template is missing`
 | The tool was installed without its payload. Re-run the install script.

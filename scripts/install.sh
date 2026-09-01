@@ -12,7 +12,7 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/profmcdan/dotnet-api-template.git}"
 REF="${REF:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-$HOME/.dotnet-api-template}"
-PACKAGE_ID="DotnetApiTemplate.Cli"
+PACKAGE_ID="ProfmcdanDotnetApiTemplate.Cli"
 PROJECT_PATH="tools/DotnetApiTemplate.Cli/DotnetApiTemplate.Cli.csproj"
 
 info()  { printf '\033[0;36m==>\033[0m %s\n' "$1"; }

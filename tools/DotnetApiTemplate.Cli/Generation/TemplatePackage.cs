@@ -39,7 +39,7 @@ public sealed class TemplatePackage
         {
             throw new InvalidOperationException(
                 $"The bundled template is missing from '{Root}'. Reinstall the tool with "
-                + "'dotnet tool update --global DotnetApiTemplate.Cli'.");
+                + "'dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli'.");
         }
 
         if (!force && IsCurrentVersionRegistered())

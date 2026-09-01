@@ -153,18 +153,21 @@ about it.
 
 == The raw `dotnet new` route
 
-The CLI is a convenience over `dotnet new`. If you would rather not install a tool, or you are
-scripting in CI, use the template directly.
+The CLI is a convenience over `dotnet new`. If you would rather not install a global tool, or you
+are scripting in CI, use the template package directly.
+
+[source,bash]
+----
+dotnet new install ProfmcdanDotnetApiTemplate.Templates
+dotnet new cleanapi -n Acme.Billing --allow-grpc --kafka-topic-prefix billing
+----
+
+Or from a clone, which is what you want while changing the template:
 
 [source,bash,subs="attributes"]
 ----
 git clone {repo}.git
 dotnet new install ./dotnet-api-template
-----
-
-[source,bash]
-----
-dotnet new cleanapi -n Acme.Billing --allow-grpc --kafka-topic-prefix billing
 ----
 
 [cols="2,1,3", options="header"]
@@ -275,35 +278,173 @@ The CLI has its own tests for the parts that are easy to break silently — name
 dotnet test tools/DotnetApiTemplate.slnx
 ----
 
-== Publishing to a feed
+== Publishing to NuGet
 
-Local installs are fine for one person. For a team, push the tool to a NuGet feed and skip the
-install script entirely.
-
-[source,bash]
-----
-dotnet pack tools/DotnetApiTemplate.Cli -c Release -o ./artifacts
-dotnet nuget push ./artifacts/DotnetApiTemplate.Cli.1.0.0.nupkg --source <feed> --api-key <key>
-----
-
-Then anyone on the team:
+Publishing means users install with one command and never clone anything:
 
 [source,bash]
 ----
-dotnet tool install --global DotnetApiTemplate.Cli
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli
 dotnet-api-template new --project-name Acme.Billing
 ----
 
-Bump `<Version>` in `tools/DotnetApiTemplate.Cli/DotnetApiTemplate.Cli.csproj` for each release.
-Because the template ships inside the package, the tool version *is* the template version — a team
-can pin a known-good scaffold with
-`dotnet tool install --global DotnetApiTemplate.Cli --version 1.2.0`.
+=== The two packages
+
+[cols="2,1,3", options="header"]
+|===
+| Package | Type | Installed with
+
+| `ProfmcdanDotnetApiTemplate.Cli`
+| Global tool
+| `dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli`
+
+| `ProfmcdanDotnetApiTemplate.Templates`
+| Template
+| `dotnet new install ProfmcdanDotnetApiTemplate.Templates`
+|===
+
+Both carry the same template payload, defined once in `Directory.Packaging.props` so they cannot
+disagree, and both are versioned together. Publish both: the tool is the better experience, the
+template package is there for anyone who cannot or would rather not install a global tool.
+
+The ids carry an owner prefix because nuget.org ids are global, first-come and permanent. The
+projects, namespaces and the `dotnet-api-template` command itself keep the shorter name — the
+prefix exists to make the *published* id unmistakably yours, not to make the code noisier.
+`PackageIdPrefix` in `Directory.Packaging.props` is the single place it is set.
+
+[TIP]
+====
+If you would rather reserve the prefix properly, use a dotted form such as
+`Profmcdan.DotnetApiTemplate.Cli` and apply for an
+https://learn.microsoft.com/nuget/nuget-org/id-prefix-reservation[ID prefix reservation] on
+`Profmcdan.*`. A reservation gives you the blue verified tick and stops anyone else publishing
+under that prefix; it only works with dot-separated prefixes. Change `PackageIdPrefix` and
+re-run the docs commands — nothing else needs touching.
+====
+
+=== One-time setup
+
+. Create a nuget.org account and sign in.
+. Create an API key at https://www.nuget.org/account/apikeys.
+   * *Glob pattern*: `ProfmcdanDotnetApiTemplate.*`
+   * *Scopes*: "Push new packages and package versions"
+   * Set an expiry you will actually notice — a year is typical.
+. Add it to the repository as a secret named `NUGET_API_KEY`
+  (Settings → Secrets and variables → Actions → New repository secret).
+
+[TIP]
+====
+Scope the key to the glob pattern rather than to "all packages". A leaked key then cannot be used
+to push anything else you own.
+====
+
+Package IDs are first-come, first-served and cannot be renamed or deleted once published — only
+unlisted. If you want the IDs reserved under your own prefix, apply for an
+https://learn.microsoft.com/nuget/nuget-org/id-prefix-reservation[ID prefix reservation] first.
+
+=== Releasing
+
+The `release` workflow does the whole thing on a tag:
+
+[source,bash]
+----
+# 1. bump the version in Directory.Packaging.props
+#    <Version>1.1.0</Version>
+
+git commit -am "chore: release 1.1.0"
+git tag v1.1.0
+git push origin main --tags
+----
+
+That triggers `.github/workflows/release.yml`, which:
+
+. Checks the tag matches `<Version>` in `Directory.Packaging.props`, and fails if they disagree —
+  otherwise a locally built tool would report a version that never existed.
+. Runs the full test suite, application and tooling.
+. Packs both packages with the version from the tag.
+. *Installs the packed tool and scaffolds a project with it*, so a broken package cannot reach
+  nuget.org.
+. Pushes to nuget.org with `--skip-duplicate`.
+. Opens a GitHub release with the packages attached and install instructions in the body.
+
+Use the `workflow_dispatch` trigger with `dry_run: true` to pack, test and upload the artifacts
+without pushing — worth doing once before your first real release.
+
+[NOTE]
+====
+nuget.org takes a few minutes to index a new package. `dotnet tool install` may not find it
+immediately after the workflow goes green.
+====
+
+=== Publishing by hand
+
+If you would rather not use the workflow:
+
+[source,bash]
+----
+dotnet test CleanArchTemplate.slnx
+dotnet test tools/DotnetApiTemplate.slnx
+
+dotnet pack tools/DotnetApiTemplate.slnx -c Release -o ./artifacts -p:Version=1.1.0
+
+# Try it before pushing - installing from a local folder is the same code path as nuget.org.
+dotnet tool install --global --add-source "$PWD/artifacts" ProfmcdanDotnetApiTemplate.Cli --version 1.1.0
+dotnet-api-template new --project-name Smoke.Test --no-git && dotnet build Smoke.Test/Smoke.Test.slnx
+
+dotnet nuget push "artifacts/*.nupkg" \
+  --source https://api.nuget.org/v3/index.json \
+  --api-key "$NUGET_API_KEY" \
+  --skip-duplicate
+----
+
+`--add-source` needs an absolute path; a relative one is silently skipped with a warning.
+
+=== A private feed instead
+
+Same commands, different source — GitHub Packages, Azure Artifacts and a plain folder on a share
+all work:
+
+[source,bash]
+----
+dotnet nuget push "artifacts/*.nupkg" --source <feed-url> --api-key <key>
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli --add-source <feed-url>
+----
+
+=== Versioning
+
+The tool version *is* the template version, because the template ships inside the package. That is
+the useful property: `--version 1.2.0` pins an exact scaffold, so everyone on a team generates
+identical projects.
+
+[cols="1,3", options="header"]
+|===
+| Bump | When
+
+| Patch
+| A fix inside the generated code or the CLI that does not change the shape of a new project.
+
+| Minor
+| New capability in the template, or a new CLI option. Existing projects are unaffected — they
+  were copied, not linked.
+
+| Major
+| A change that would surprise someone expecting the previous scaffold: a renamed layer, a
+  different messaging contract, a dropped option.
+|===
+
+Pre-release versions work as usual and are a good way to try a scaffold before committing to it:
+
+[source,bash]
+----
+git tag v1.2.0-rc.1
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli --version 1.2.0-rc.1
+----
 
 [IMPORTANT]
 ====
-The package sets `NoDefaultExcludes` so that dot-prefixed paths survive packing. Without it NuGet
-silently drops `.template.config/`, `.gitignore`, `.editorconfig` and `.env.sample`, and the
-resulting tool produces broken projects. Do not remove it.
+`NoDefaultExcludes` is set in `Directory.Packaging.props` so dot-prefixed paths survive packing.
+Without it NuGet silently drops `.template.config/`, `.gitignore`, `.editorconfig` and
+`.env.sample` — and the published package produces broken projects. Do not remove it.
 ====
 
 == Troubleshooting
@@ -333,8 +474,23 @@ resulting tool produces broken projects. Do not remove it.
   against the *template's* names — keep the pattern on `src/CleanArchTemplate.Api/…`.
 
 | `dotnet pack` fails with NU5119
-| A dot-prefixed file is being excluded. `NoDefaultExcludes` should be `true` in the tool's
-  csproj.
+| A dot-prefixed file is being excluded. `NoDefaultExcludes` should be `true` in
+  `Directory.Packaging.props`.
+
+| The release workflow fails on the version check
+| The tag and `<Version>` in `Directory.Packaging.props` disagree. Bump the file, commit, delete
+  the tag (`git tag -d v1.1.0 && git push --delete origin v1.1.0`) and re-tag.
+
+| `dotnet nuget push` returns 403
+| The API key is missing, expired, or its glob pattern does not cover the package ID. Keys are
+  scoped to `ProfmcdanDotnetApiTemplate.*` by the setup above.
+
+| `--add-source ./artifacts` is ignored with "the source is not valid"
+| NuGet needs an absolute path there. Use `"$PWD/artifacts"`.
+
+| A published version has a mistake in it
+| Versions cannot be replaced or deleted, only unlisted. Unlist it on nuget.org and publish a
+  patch.
 
 | Restore fails immediately after generating
 | Usually an offline feed or a private source in a parent-directory `NuGet.config`. Generate with

@@ -1,0 +1,76 @@
+<Project>
+
+  <!--
+    Shared NuGet metadata for the two publishable packages:
+
+      ProfmcdanDotnetApiTemplate.Cli        the `dotnet-api-template` global tool (bundles the template)
+      ProfmcdanDotnetApiTemplate.Templates  the same template as a plain `dotnet new` package
+
+    They ship together and share one version number, so a given version of the tool and of the
+    template package always scaffold identical projects.
+
+    Bump <Version> here, tag the commit `v<version>`, and the release workflow does the rest.
+  -->
+
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+
+    <!--
+      Owner-prefixed so the ids are unambiguously ours on nuget.org, where ids are global,
+      first-come and permanent. The projects, namespaces and the `dotnet-api-template` command
+      itself deliberately keep the shorter name - only the published id carries the prefix.
+    -->
+    <PackageIdPrefix>ProfmcdanDotnetApiTemplate</PackageIdPrefix>
+
+    <Authors>profmcdan</Authors>
+    <Company>profmcdan</Company>
+    <Copyright>Copyright (c) profmcdan</Copyright>
+
+    <PackageProjectUrl>https://github.com/profmcdan/dotnet-api-template</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/profmcdan/dotnet-api-template</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/</PackageOutputPath>
+
+    <!--
+      The payload is a project template: .template.config, .gitignore, .editorconfig and
+      .env.sample are all essential, and NuGet drops dot-prefixed paths unless told otherwise.
+    -->
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+
+    <!-- Source Link: ships the commit with the package so stack traces resolve to real code. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))</RepoRoot>
+  </PropertyGroup>
+
+  <!--
+    Everything that makes up the template. Shared by both packages so they can never disagree
+    about what a generated project contains.
+
+    LICENSE is excluded on purpose: it covers this template, and shipping it into someone else's
+    project would attribute their code to us. A generated project picks its own licence.
+  -->
+  <ItemGroup>
+    <TemplatePayload Include="$(RepoRoot)**\*"
+                     Exclude="$(RepoRoot)tools\**;
+                              $(RepoRoot)scripts\**;
+                              $(RepoRoot).github\**;
+                              $(RepoRoot)artifacts\**;
+                              $(RepoRoot)**\bin\**;
+                              $(RepoRoot)**\obj\**;
+                              $(RepoRoot).git\**;
+                              $(RepoRoot).data\**;
+                              $(RepoRoot).env;
+                              $(RepoRoot)Directory.Packaging.props;
+                              $(RepoRoot)LICENSE;
+                              $(RepoRoot)**\*.user;
+                              $(RepoRoot)**\.DS_Store" />
+  </ItemGroup>
+
+</Project>

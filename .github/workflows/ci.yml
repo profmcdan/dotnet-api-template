@@ -1,0 +1,99 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+
+jobs:
+  test:
+    name: build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build the application
+        run: dotnet build CleanArchTemplate.slnx --configuration Release
+
+      - name: Build the tooling
+        run: dotnet build tools/DotnetApiTemplate.slnx --configuration Release
+
+      # The runner ships Docker, so the Testcontainers-backed integration tests run for real.
+      - name: Test the application
+        run: dotnet test CleanArchTemplate.slnx --configuration Release --no-build --logger "trx;LogFileName=app.trx" --results-directory TestResults
+
+      - name: Test the tooling
+        run: dotnet test tools/DotnetApiTemplate.slnx --configuration Release --no-build --logger "trx;LogFileName=tools.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
+          retention-days: 7
+
+  scaffold:
+    name: scaffold and build a generated project
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # A dotted name derives a hyphenated default topic prefix, which is where
+          # prefix substitution is most likely to land somewhere it is not legal.
+          - name: Acme.Billing
+            args: --allow-grpc
+          - name: WithGrpc
+            args: --allow-grpc --kafka-topic-prefix withgrpc
+          - name: Plain
+            args: ''
+          - name: Minimal
+            args: --no-tests --no-docs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Proves the shipped artifact works, not just the repository it was built from.
+      - name: Install the CLI from source
+        run: ./scripts/install.sh
+
+      - name: Scaffold ${{ matrix.name }}
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet-api-template new --project-name ${{ matrix.name }} --no-git ${{ matrix.args }}
+
+      - name: Build ${{ matrix.name }}
+        run: dotnet build ${{ matrix.name }}/${{ matrix.name }}.slnx --configuration Release
+
+      - name: Fail if the template's own name survived
+        run: |
+          if grep -rIl "CleanArchTemplate" ${{ matrix.name }} --exclude-dir=obj --exclude-dir=bin; then
+            echo "::error::Generated project still contains the template's own name."
+            exit 1
+          fi

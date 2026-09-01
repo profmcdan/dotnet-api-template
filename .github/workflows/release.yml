@@ -1,0 +1,134 @@
+name: release
+
+# Tag a commit `v1.2.3` and this publishes ProfmcdanDotnetApiTemplate.Cli and
+# ProfmcdanDotnetApiTemplate.Templates to nuget.org, then opens a GitHub release.
+#
+# One-time setup: add a repository secret NUGET_API_KEY from
+# https://www.nuget.org/account/apikeys (scope it to the two package IDs).
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without the leading v (e.g. 1.2.3)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Pack and upload artifacts, but do not push to nuget.org'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CI: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # Source Link embeds the commit; a shallow clone breaks it.
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a valid semantic version."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION"
+
+      # A tag that disagrees with the checked-in version means locally built tools would report
+      # the wrong version. Catch it here rather than after it is on nuget.org forever.
+      - name: Check the tag matches Directory.Packaging.props
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DECLARED=$(grep -oP '(?<=<Version>)[^<]+' Directory.Packaging.props | head -1)
+
+          if [ "$VERSION" != "$DECLARED" ]; then
+            echo "::error::Tag says $VERSION but Directory.Packaging.props says $DECLARED. Bump the file and re-tag."
+            exit 1
+          fi
+
+      - name: Test
+        run: |
+          dotnet test CleanArchTemplate.slnx --configuration Release
+          dotnet test tools/DotnetApiTemplate.slnx --configuration Release
+
+      - name: Pack
+        run: |
+          dotnet pack tools/DotnetApiTemplate.slnx \
+            --configuration Release \
+            --output ./artifacts \
+            -p:Version=${{ steps.version.outputs.version }}
+
+          ls -la ./artifacts
+
+      # Install the packed tool and scaffold with it, so a broken package cannot reach nuget.org.
+      - name: Smoke test the packed tool
+        run: |
+          dotnet tool install --global --add-source "$PWD/artifacts" \
+            ProfmcdanDotnetApiTemplate.Cli --version ${{ steps.version.outputs.version }}
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          dotnet-api-template info
+          dotnet-api-template new --project-name Smoke.Test --no-git --allow-grpc
+          dotnet build Smoke.Test/Smoke.Test.slnx --configuration Release
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/*
+          retention-days: 30
+
+      - name: Push to nuget.org
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: |
+          dotnet nuget push "artifacts/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate
+
+      - name: Create the GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            ```bash
+            dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli --version ${{ steps.version.outputs.version }}
+            dotnet-api-template new --project-name Acme.Billing --allow-grpc
+            ```
+
+            Prefer no global tool?
+
+            ```bash
+            dotnet new install ProfmcdanDotnetApiTemplate.Templates::${{ steps.version.outputs.version }}
+            dotnet new cleanapi -n Acme.Billing --allow-grpc
+            ```

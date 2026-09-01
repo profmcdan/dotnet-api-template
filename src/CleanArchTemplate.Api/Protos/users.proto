@@ -2,7 +2,9 @@ syntax = "proto3";
 
 option csharp_namespace = "CleanArchTemplate.Api.Grpc";
 
-package cleanarch.users.v1;
+// Deliberately NOT the Kafka topic prefix: that is a deployment identity which may legally
+// contain hyphens, and a hyphen is not valid in a protobuf package name.
+package users.v1;
 
 import "google/protobuf/timestamp.proto";
 

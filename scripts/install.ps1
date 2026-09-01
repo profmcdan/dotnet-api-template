@@ -25,7 +25,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$PackageId   = 'DotnetApiTemplate.Cli'
+$PackageId   = 'ProfmcdanDotnetApiTemplate.Cli'
 $ProjectPath = 'tools\DotnetApiTemplate.Cli\DotnetApiTemplate.Cli.csproj'
 
 function Write-Step { param([string] $Message) Write-Host "==> $Message" -ForegroundColor Cyan }

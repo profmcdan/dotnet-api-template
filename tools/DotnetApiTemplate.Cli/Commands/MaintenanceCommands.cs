@@ -17,7 +17,7 @@ public static class MaintenanceCommands
         Console.WriteLine($"Template version {TemplatePackage.Version} is registered as '{TemplatePackage.ShortName}'.");
         Console.WriteLine();
         Console.WriteLine("To pick up a newer template, update the tool itself:");
-        Console.WriteLine("  dotnet tool update --global DotnetApiTemplate.Cli");
+        Console.WriteLine("  dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli");
         Console.WriteLine();
         return ExitCodes.Success;
     }
@@ -32,7 +32,7 @@ public static class MaintenanceCommands
 
         Console.WriteLine();
         Console.WriteLine("To remove the tool as well:");
-        Console.WriteLine("  dotnet tool uninstall --global DotnetApiTemplate.Cli");
+        Console.WriteLine("  dotnet tool uninstall --global ProfmcdanDotnetApiTemplate.Cli");
         Console.WriteLine();
         return ExitCodes.Success;
     }
@@ -57,7 +57,7 @@ public static class MaintenanceCommands
         if (!TemplatePackage.Exists)
         {
             Console.Error.WriteLine("The bundled template is missing. Reinstall with:");
-            Console.Error.WriteLine("  dotnet tool update --global DotnetApiTemplate.Cli");
+            Console.Error.WriteLine("  dotnet tool update --global ProfmcdanDotnetApiTemplate.Cli");
             return ExitCodes.GenerationFailed;
         }
 

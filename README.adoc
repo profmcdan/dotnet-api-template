@@ -10,10 +10,11 @@ A production-shaped ASP.NET Core Web API template: clean architecture, JWT user 
 an invite-by-email flow carried over Kafka, a transactional outbox, EF Core on PostgreSQL, Redis,
 a migrator job, background workers, and a Docker Compose stack that runs the whole thing.
 
-It ships as a CLI:
+It ships as a CLI on NuGet:
 
 [source,bash]
 ----
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli
 dotnet-api-template new --project-name Acme.Billing --allow-grpc
 ----
 
@@ -72,19 +73,10 @@ toc::[]
 
 == Quick start
 
-Install the CLI — it carries the template inside it, so this is the only thing to install:
-
-[source,bash,subs="attributes"]
-----
-git clone {repo}.git
-cd dotnet-api-template
-./scripts/install.sh
-----
-
-On Windows, run `.\scripts\install.ps1` instead. Then scaffold a project:
-
 [source,bash]
 ----
+dotnet tool install --global ProfmcdanDotnetApiTemplate.Cli
+
 dotnet-api-template new --project-name Acme.Billing --allow-grpc
 cd Acme.Billing
 docker compose up -d
@@ -93,6 +85,24 @@ docker compose up -d
 The project name is applied across the board — the solution, every project, every assembly and
 every namespace become `Acme.Billing.*`. The CLI also writes `.env` with a freshly generated
 signing key and database password, and makes the first commit.
+
+Prefer no global tool? The template is published on its own too:
+
+[source,bash]
+----
+dotnet new install ProfmcdanDotnetApiTemplate.Templates
+dotnet new cleanapi -n Acme.Billing --allow-grpc
+----
+
+Working on the template itself, or before the first release is published — build the CLI from
+source:
+
+[source,bash,subs="attributes"]
+----
+git clone {repo}.git
+cd dotnet-api-template
+./scripts/install.sh          # .\scripts\install.ps1 on Windows
+----
 
 `docker compose up` builds three images and starts seven containers. The migrator applies the
 schema, creates the Kafka topics and seeds the bootstrap administrator, then the API and worker
@@ -180,11 +190,13 @@ tests/
   CleanArchTemplate.Application.UnitTests   handlers against substituted ports
   CleanArchTemplate.Api.IntegrationTests    real Postgres, Redis and Redpanda containers
 
-tools/
+tools/                              published as ProfmcdanDotnetApiTemplate.* on nuget.org
   DotnetApiTemplate.Cli             the `dotnet-api-template` global tool; bundles the template
   DotnetApiTemplate.Cli.UnitTests   name validation, .env rewriting and argument parsing
+  DotnetApiTemplate.Templates       the same template as a plain `dotnet new` package
 
 scripts/                            install.sh, install.ps1, uninstall.sh
+.github/workflows/                  ci.yml (build, test, scaffold) and release.yml (publish on a tag)
 docs/                               architecture, design and installation documentation
 Dockerfile                          multi-stage, non-root, one file for all three services
 compose.yml                         the full local stack
@@ -268,6 +280,9 @@ dotnet test tools/DotnetApiTemplate.slnx
 # rebuild and reinstall the CLI after changing the template
 ./scripts/install.sh
 
+# pack both NuGet packages locally
+dotnet pack tools/DotnetApiTemplate.slnx -c Release -o ./artifacts
+
 # unit tests only (no Docker required)
 dotnet test tests/CleanArchTemplate.Domain.UnitTests
 dotnet test tests/CleanArchTemplate.Application.UnitTests
@@ -290,6 +305,22 @@ docker compose down
 # stop everything and delete the volumes
 docker compose down -v
 ----
+
+== Releasing this template
+
+Bump `<Version>` in `Directory.Packaging.props`, tag the commit, and push:
+
+[source,bash]
+----
+git commit -am "chore: release 1.1.0" && git tag v1.1.0 && git push origin main --tags
+----
+
+`.github/workflows/release.yml` runs the tests, packs both packages, installs the packed tool and
+scaffolds a project with it, then pushes to nuget.org and opens a GitHub release. It needs one
+repository secret, `NUGET_API_KEY`.
+
+Full details, including publishing by hand and to a private feed, are in
+link:docs/template-usage.adoc#_publishing_to_nuget[template usage].
 
 == Before you ship
 
