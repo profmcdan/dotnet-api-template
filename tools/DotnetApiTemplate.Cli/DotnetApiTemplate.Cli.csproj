@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DotnetApiTemplate.Cli</RootNamespace>
+    <AssemblyName>dotnet-api-template</AssemblyName>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>dotnet-api-template</ToolCommandName>
+    <PackageId>DotnetApiTemplate.Cli</PackageId>
+    <Version>1.0.0</Version>
+    <!-- Keep `info` and `version` readable; the commit hash belongs in the package metadata. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Title>dotnet-api-template</Title>
+    <Authors>profmcdan</Authors>
+    <Description>Scaffolds a clean-architecture ASP.NET Core Web API with PostgreSQL, Kafka, Redis, a migrator, workers and Docker Compose.</Description>
+    <PackageProjectUrl>https://github.com/profmcdan/dotnet-api-template</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/profmcdan/dotnet-api-template</RepositoryUrl>
+    <PackageTags>dotnet-new;template;clean-architecture;webapi;kafka;postgres;redis</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../artifacts/</PackageOutputPath>
+
+    <!-- The tool is a developer utility, not part of the generated application. -->
+    <NoWarn>$(NoWarn);CA1303;CA1031;CA2000</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      The payload is a template: .template.config, .gitignore, .editorconfig and .env.sample
+      are all essential, and NuGet drops dot-prefixed paths unless told otherwise.
+    -->
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../'))</RepoRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    The tool carries the template with it, so `dotnet tool install` is the only step a user needs.
+    Everything under the repository root is shipped except the tool itself, build output and
+    anything machine-local.
+  -->
+  <ItemGroup>
+    <TemplatePayload Include="$(RepoRoot)**\*"
+                     Exclude="$(RepoRoot)tools\**;
+                              $(RepoRoot)**\bin\**;
+                              $(RepoRoot)**\obj\**;
+                              $(RepoRoot).git\**;
+                              $(RepoRoot).github\**;
+                              $(RepoRoot)artifacts\**;
+                              $(RepoRoot).data\**;
+                              $(RepoRoot).env;
+                              $(RepoRoot)**\*.user;
+                              $(RepoRoot)**\.DS_Store" />
+
+    <Content Include="@(TemplatePayload)"
+             TargetPath="template\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+  </ItemGroup>
+
+</Project>

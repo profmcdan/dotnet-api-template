@@ -20,12 +20,13 @@ link:../README.adoc[root README].
   template.
 
 | link:install.adoc[install.adoc]
-| Run it: prerequisites for macOS and Windows, configuration, the Compose stack, running without
-  Docker, EF migrations, tests, and a troubleshooting table.
+| Get going: prerequisites for macOS and Windows, installing the `dotnet-api-template` CLI,
+  creating a project, configuration, the Compose stack, running without Docker, EF migrations,
+  tests, and a troubleshooting table.
 
 | link:template-usage.adoc[template-usage.adoc]
-| Reuse it: install the `dotnet new` template on macOS or Windows, generate a project, what each
-  parameter changes, editing the template itself, and packaging it for a team.
+| The full CLI reference, exactly what the project name changes, the raw `dotnet new` route,
+  editing the template itself, and publishing it to a feed.
 
 | link:diagrams/README.adoc[diagrams/]
 | PlantUML sources for the diagrams that appear as ASCII art in the documents above, and how to
@@ -35,14 +36,15 @@ link:../README.adoc[root README].
 == Reading order
 
 New to the project::
-link:install.adoc[install.adoc] to get it running, then
+link:install.adoc[install.adoc] to install the CLI and scaffold something, then
 link:architecture.adoc[architecture.adoc] to understand what you just started.
 
 About to write a feature::
 link:design.adoc#_recipes[design.adoc → Recipes].
 
 Starting a new service from this::
-link:template-usage.adoc[template-usage.adoc].
+link:install.adoc#_install_the_cli[install.adoc → Install the CLI], then
+link:template-usage.adoc[template-usage.adoc] for the full option reference.
 
 On call::
 link:architecture.adoc#_failure_modes[architecture.adoc → Failure modes] and

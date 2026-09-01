@@ -114,7 +114,10 @@
         ".data/**",
         ".tools/**",
         "**/TestResults/**",
-        ".template.config/**"
+        ".template.config/**",
+        "tools/**",
+        "artifacts/**",
+        "scripts/**"
       ]
     }
   ],

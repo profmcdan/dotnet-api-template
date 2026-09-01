@@ -4,14 +4,22 @@
 :icons: font
 :source-highlighter: rouge
 :experimental:
+:repo: https://github.com/profmcdan/dotnet-api-template
 
 A production-shaped ASP.NET Core Web API template: clean architecture, JWT user management with
 an invite-by-email flow carried over Kafka, a transactional outbox, EF Core on PostgreSQL, Redis,
 a migrator job, background workers, and a Docker Compose stack that runs the whole thing.
 
-It is a `dotnet new` template. Generate a project, set a few values in `.env`, and
-`docker compose up` gives you a working system with a seeded administrator, created Kafka topics
-and a local mail catcher.
+It ships as a CLI:
+
+[source,bash]
+----
+dotnet-api-template new --project-name Acme.Billing --allow-grpc
+----
+
+That renames everything to your project — solution, projects, assemblies and namespaces — writes
+a `.env` with real generated secrets, and makes the first commit. `docker compose up` then gives
+you a working system with a seeded administrator, created Kafka topics and a local mail catcher.
 
 toc::[]
 
@@ -56,18 +64,39 @@ toc::[]
 | Tests
 | Domain and application unit tests, plus integration tests that run against real PostgreSQL,
   Redis and Redpanda containers via Testcontainers.
+
+| Tooling
+| A `dotnet-api-template` global tool that bundles the template, validates the project name,
+  generates the secrets and initialises git — with its own test suite.
 |===
 
 == Quick start
 
+Install the CLI — it carries the template inside it, so this is the only thing to install:
+
+[source,bash,subs="attributes"]
+----
+git clone {repo}.git
+cd dotnet-api-template
+./scripts/install.sh
+----
+
+On Windows, run `.\scripts\install.ps1` instead. Then scaffold a project:
+
 [source,bash]
 ----
-cp .env.sample .env          # then edit JWT__SIGNINGKEY and the passwords
+dotnet-api-template new --project-name Acme.Billing --allow-grpc
+cd Acme.Billing
 docker compose up -d
 ----
 
-That builds three images and starts seven containers. The migrator applies the schema, creates
-the Kafka topics and seeds the bootstrap administrator, then the API and worker start.
+The project name is applied across the board — the solution, every project, every assembly and
+every namespace become `Acme.Billing.*`. The CLI also writes `.env` with a freshly generated
+signing key and database password, and makes the first commit.
+
+`docker compose up` builds three images and starts seven containers. The migrator applies the
+schema, creates the Kafka topics and seeds the bootstrap administrator, then the API and worker
+start.
 
 [cols="2,3,3", options="header"]
 |===
@@ -151,6 +180,11 @@ tests/
   CleanArchTemplate.Application.UnitTests   handlers against substituted ports
   CleanArchTemplate.Api.IntegrationTests    real Postgres, Redis and Redpanda containers
 
+tools/
+  DotnetApiTemplate.Cli             the `dotnet-api-template` global tool; bundles the template
+  DotnetApiTemplate.Cli.UnitTests   name validation, .env rewriting and argument parsing
+
+scripts/                            install.sh, install.ps1, uninstall.sh
 docs/                               architecture, design and installation documentation
 Dockerfile                          multi-stage, non-root, one file for all three services
 compose.yml                         the full local stack
@@ -182,7 +216,34 @@ Everything lives in link:docs/README.adoc[`docs/`].
 | Render the PlantUML sources behind the ASCII diagrams in the documents above.
 |===
 
-== Template parameters
+== CLI options
+
+[source,bash]
+----
+dotnet-api-template new --help
+----
+
+[cols="2,1,1,3", options="header"]
+|===
+| Option | Alias | Default | Effect
+
+| `--project-name`       | `-n` | _required_  | Solution, project, assembly and namespace names.
+| `--output`             | `-o` | current dir | Parent directory for the new project.
+| `--allow-grpc`         | `-g` | off         | Adds a gRPC surface over the same query handlers.
+| `--kafka-topic-prefix` | `-k` | from name   | Topic prefix, consumer group and Redis key namespace.
+| `--api-port`           | `-p` | `5080`      | Host port Compose publishes the API on.
+| `--database-name`      | `-d` | `appdb`     | PostgreSQL database name.
+| `--no-tests`           |      | off         | Omit the test projects.
+| `--no-docs`            |      | off         | Omit `docs/`.
+| `--no-env`             |      | off         | Do not write `.env` with generated secrets.
+| `--no-git`             |      | off         | Do not `git init` and commit.
+| `--dry-run`            |      | off         | Print the command that would run; write nothing.
+|===
+
+Other commands: `info` (version and prerequisite check), `update` (re-register the template),
+`uninstall-template`, `version`.
+
+Prefer not to install a tool? The template also works directly:
 
 [source,bash]
 ----
@@ -190,29 +251,22 @@ dotnet new install .
 dotnet new cleanapi -n Acme.Billing --allow-grpc --kafka-topic-prefix billing
 ----
 
-[cols="2,1,1,3", options="header"]
-|===
-| Parameter | Alias | Default | Effect
-
-| `-n, --name`                | | _directory name_ | Renames the solution, every project, namespace and assembly.
-| `--allow-grpc`              | `-g` | `false`     | Adds a gRPC surface over the same query handlers, plus reflection in Development.
-| `--kafka-topic-prefix`      | `-k` | `cleanarch` | Prefix for every topic, the Redis key namespace and the consumer group.
-| `--api-port`                | `-p` | `5080`      | Host port Compose publishes the API on.
-| `--database-name`           | `-d` | `appdb`     | PostgreSQL database name.
-| `--include-tests`           | `-t` | `true`      | Include the three test projects.
-| `--include-docs`            |      | `true`      | Include this `docs/` folder.
-| `--skip-restore`            |      | `false`     | Skip the automatic restore after generation.
-|===
-
-See link:docs/template-usage.adoc[template usage] for the full walk-through, including Windows.
+See link:docs/template-usage.adoc[template usage] for the full reference and the differences
+between the two routes.
 
 == Common tasks
 
 [source,bash]
 ----
-# build and test everything
+# build and test the application
 dotnet build CleanArchTemplate.slnx
 dotnet test CleanArchTemplate.slnx
+
+# build and test the CLI itself
+dotnet test tools/DotnetApiTemplate.slnx
+
+# rebuild and reinstall the CLI after changing the template
+./scripts/install.sh
 
 # unit tests only (no Docker required)
 dotnet test tests/CleanArchTemplate.Domain.UnitTests

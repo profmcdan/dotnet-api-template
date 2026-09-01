@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/tools/">
+    <Project Path="DotnetApiTemplate.Cli/DotnetApiTemplate.Cli.csproj" />
+    <Project Path="DotnetApiTemplate.Cli.UnitTests/DotnetApiTemplate.Cli.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -4,9 +4,13 @@
 :icons: font
 :source-highlighter: rouge
 :experimental:
+:repo: https://github.com/profmcdan/dotnet-api-template
 
-How to run this project on macOS and Windows. To install it as a reusable `dotnet new` template
-instead, see link:template-usage.adoc[Template usage].
+Install the `dotnet-api-template` CLI, scaffold a project with it, and run that project on macOS
+or Windows.
+
+For the full CLI reference and for editing the template itself, see
+link:template-usage.adoc[Template usage].
 
 toc::[]
 
@@ -16,14 +20,14 @@ toc::[]
 |===
 | Tool | Version | Needed for
 
-| .NET SDK          | 10.0+  | Building, testing, EF tooling
-| Docker Desktop    | 4.30+  | The Compose stack and the integration tests
-| Git               | any    | Cloning
-| `jq`              | any    | Optional, for the curl examples
+| .NET SDK       | 10.0+ | Installing the CLI, building, EF tooling
+| Docker Desktop | 4.30+ | Running a generated project and its integration tests
+| Git            | any   | Installing the CLI, and the initial commit it makes for you
+| `jq`           | any   | Optional, for the `curl` examples further down
 |===
 
-Everything else - PostgreSQL, Redis, Redpanda, a mail catcher - runs in containers. Nothing needs
-to be installed on the host.
+Everything else — PostgreSQL, Redis, Redpanda, a mail catcher — runs in containers. Nothing else
+is installed on the host.
 
 === macOS
 
@@ -31,10 +35,10 @@ to be installed on the host.
 ----
 brew install --cask dotnet-sdk
 brew install --cask docker
-brew install jq
+brew install git jq
 ----
 
-Start Docker Desktop once so the daemon is running, then check:
+Start Docker Desktop once so the daemon is running, then confirm:
 
 [source,bash]
 ----
@@ -42,29 +46,28 @@ dotnet --version    # 10.0.x or later
 docker info         # must not error
 ----
 
-On Apple Silicon every image used here has a native `arm64` build, so nothing runs under
-emulation.
+On Apple Silicon every image used here has a native `arm64` build, so nothing runs emulated.
 
 === Windows
 
-Use winget from PowerShell:
+From PowerShell:
 
 [source,powershell]
 ----
 winget install Microsoft.DotNet.SDK.10
 winget install Docker.DockerDesktop
+winget install Git.Git
 winget install jqlang.jq
 ----
 
-Docker Desktop needs the WSL 2 backend. If it is not already enabled, from an *administrator*
-PowerShell:
+Docker Desktop needs the WSL 2 backend. If it is not enabled, from an *administrator* PowerShell:
 
 [source,powershell]
 ----
 wsl --install
 ----
 
-Restart, start Docker Desktop, and confirm it reports "Engine running". Then:
+Restart, start Docker Desktop, wait for "Engine running", then confirm:
 
 [source,powershell]
 ----
@@ -74,52 +77,204 @@ docker info
 
 [TIP]
 ====
-Line endings: this repository ships an `.editorconfig` that sets `end_of_line = lf`. If Git is
+Line endings: the template ships an `.editorconfig` that sets `end_of_line = lf`. If Git is
 configured with `core.autocrlf=true`, shell scripts copied into containers can gain CRLF endings
-and fail with `no such file or directory`. Either set `core.autocrlf=input` or work inside WSL.
+and fail with `no such file or directory`. Set `core.autocrlf=input`, or work inside WSL.
 ====
 
-== Configure
+== Install the CLI
+
+The tool carries the project template inside it, so this is the only thing you install. There is
+no separate template package to manage.
+
+=== macOS and Linux
+
+[source,bash,subs="attributes"]
+----
+git clone {repo}.git
+cd dotnet-api-template
+./scripts/install.sh
+----
+
+Or without cloning first:
+
+[source,bash,subs="attributes"]
+----
+curl -fsSL {repo}/raw/main/scripts/install.sh | bash
+----
+
+[NOTE]
+====
+The piped form clones into `~/.dotnet-api-template/src` and builds from there. Read the script
+before piping it to a shell if that is not a habit you are comfortable with — the clone-then-run
+form above does exactly the same work and lets you look first.
+====
+
+=== Windows
+
+[source,powershell,subs="attributes"]
+----
+git clone {repo}.git
+cd dotnet-api-template
+.\scripts\install.ps1
+----
+
+Or without cloning first:
+
+[source,powershell,subs="attributes"]
+----
+irm {repo}/raw/main/scripts/install.ps1 | iex
+----
+
+=== What the installer does
+
+. Checks for the .NET SDK 10 or later.
+. Builds `tools/DotnetApiTemplate.Cli` and packs it as a .NET global tool.
+. Installs that tool as `dotnet-api-template`.
+. Registers the bundled project template with the SDK under the short name `cleanapi`.
+
+It uninstalls any previous copy first, so re-running it always lands the build you just made
+rather than silently keeping an older one.
+
+=== Confirm the install
 
 [source,bash]
 ----
-git clone <your-repository-url>
-cd <repository>
-cp .env.sample .env
+dotnet-api-template info
 ----
 
-`.env.sample` documents every setting. Three of them matter before you start:
+[listing]
+----
+  dotnet-api-template  1.0.0
+  template short name  cleanapi
+  template location    ~/.dotnet/tools/.store/dotnetapitemplate.cli/1.0.0/…/template
+  template present     yes
+
+  .NET SDK             10.0.201
+  Docker               Docker version 29.7.2
+  git                  git version 2.50.1
+----
+
+If the command is not found, the .NET tools directory is not on your `PATH`:
+
+[source,bash]
+----
+# macOS / Linux — add to ~/.zshrc or ~/.bashrc
+export PATH="$PATH:$HOME/.dotnet/tools"
+----
+
+[source,powershell]
+----
+# Windows — then open a new terminal
+[Environment]::SetEnvironmentVariable('PATH', "$env:PATH;$HOME\.dotnet\tools", 'User')
+----
+
+== Create a project
+
+[source,bash]
+----
+dotnet-api-template new --project-name Acme.Billing
+----
+
+The name is applied across the board — the solution, every project, every assembly and every
+namespace:
+
+[listing]
+----
+Acme.Billing/
+├── Acme.Billing.slnx
+└── src/
+    ├── Acme.Billing.Domain/          namespace Acme.Billing.Domain.Users;
+    ├── Acme.Billing.Contracts/       namespace Acme.Billing.Contracts.Messaging;
+    ├── Acme.Billing.Application/     namespace Acme.Billing.Application.Users.Commands;
+    ├── Acme.Billing.Infrastructure/  namespace Acme.Billing.Infrastructure.Persistence;
+    ├── Acme.Billing.Api/             namespace Acme.Billing.Api.Controllers;
+    ├── Acme.Billing.Migrator/        namespace Acme.Billing.Migrator.Steps;
+    └── Acme.Billing.Worker/          namespace Acme.Billing.Worker.Consumers;
+----
+
+With everything specified:
+
+[source,bash]
+----
+dotnet-api-template new \
+  --project-name Acme.Billing \
+  --allow-grpc \
+  --kafka-topic-prefix billing \
+  --api-port 6000 \
+  --database-name billingdb \
+  --output ~/src
+----
+
+[cols="2,1,3", options="header"]
+|===
+| Option | Alias | Effect
+
+| `--project-name`       | `-n` | Solution, project, assembly and namespace names. Required.
+| `--output`             | `-o` | Where to create it. Defaults to the current directory.
+| `--allow-grpc`         | `-g` | Adds a gRPC surface over the same query handlers.
+| `--kafka-topic-prefix` | `-k` | Topic prefix, consumer group and Redis key namespace. Defaults to a lower-cased form of the project name.
+| `--api-port`           | `-p` | Host port Compose publishes the API on. Defaults to `5080`.
+| `--database-name`      | `-d` | PostgreSQL database name. Defaults to `appdb`.
+| `--no-tests`           |      | Omit the test projects.
+| `--no-docs`            |      | Omit `docs/`.
+| `--no-env`             |      | Do not write `.env`.
+| `--no-git`             |      | Do not `git init` and commit.
+| `--dry-run`            |      | Print what would happen and write nothing.
+|===
+
+Run `dotnet-api-template new --help` for the complete list.
+
+[TIP]
+====
+`--dry-run` prints the exact `dotnet new` command the tool would run. Useful when you want to see
+what is happening, or to script the raw command yourself.
+====
+
+=== What the CLI does after generating
+
+Two things a fresh project always needs:
+
+* *Writes `.env`* from `.env.sample`, replacing the placeholder `JWT__SIGNINGKEY` with 48 bytes of
+  real entropy and `POSTGRES_PASSWORD` with a random alphanumeric password — kept in step with the
+  password inside `DATABASE__CONNECTIONSTRING`. The sample signing key never reaches a running
+  system. `.env` is git-ignored.
+* *Initialises git* and commits the scaffold, so your first change is a readable diff.
+
+Suppress either with `--no-env` or `--no-git`.
+
+== Configure
+
+The CLI generates working secrets, so a local run needs no edits. Two values are still worth
+setting before you go further:
 
 [cols="2,3", options="header"]
 |===
 | Key | What to set
 
-| `JWT__SIGNINGKEY`
-| At least 32 characters. Generate one: `openssl rand -base64 48` (macOS/Linux) or
-  `[Convert]::ToBase64String((1..48 \| % { Get-Random -Max 256 }))` (PowerShell).
-
-| `POSTGRES_PASSWORD`
-| Anything for local work. It must match the password inside `DATABASE__CONNECTIONSTRING`.
-
 | `MIGRATOR__SEEDADMINEMAIL` / `MIGRATOR__SEEDADMINPASSWORD`
-| The bootstrap administrator. Created only when the users table is empty. The password must pass
-  the policy: 12+ characters, a letter, a digit or symbol, and no well-known phrases.
+| The bootstrap administrator, created only when the users table is empty. Still the sample values.
+  The password must pass the policy: 12+ characters, a letter, a digit or symbol, no well-known
+  phrases.
+
+| `APP__PUBLICBASEURL`
+| Your front end. Every link in every email is built from this, never from the request's `Host`
+  header.
 |===
 
-Keys use the ASP.NET Core convention - `Section__Key` maps onto configuration `Section:Key`. A
-real environment variable always beats the value in `.env`, so CI and production can override
-anything without editing the file.
-
-`.env` is git-ignored. Do not commit it.
+`.env.sample` documents every other setting. Keys use the ASP.NET Core convention — `Section__Key`
+maps onto configuration `Section:Key` — and a real environment variable always beats the file, so
+CI and production override anything without editing it.
 
 == Run with Docker
 
 [source,bash]
 ----
+cd Acme.Billing
 docker compose up -d
 ----
 
-First run takes a few minutes to build three images. Then:
+The first run builds three images. Then:
 
 [source,bash]
 ----
@@ -138,8 +293,7 @@ redpanda-console   Up
 worker             Up (healthy)
 ----
 
-`migrator` will show as `Exited (0)` - that is correct, it is a run-to-completion job. Check what
-it did:
+`migrator` shows as `Exited (0)` — correct, it is a run-to-completion job. Check what it did:
 
 [source,bash]
 ----
@@ -153,18 +307,18 @@ seeded.
 
 [cols="2,2,3", options="header"]
 |===
-| Service | URL | Notes
+| Service | URL | Set by
 
-| API              | http://localhost:5080          | `API_HTTP_PORT`
-| API reference    | http://localhost:5080/scalar/v1 | Development only
-| Liveness         | http://localhost:5080/health/live | Checks nothing external, by design
+| API              | http://localhost:5080              | `API_HTTP_PORT`
+| API reference    | http://localhost:5080/scalar/v1    | Development only
+| Liveness         | http://localhost:5080/health/live  | Checks nothing external, by design
 | Readiness        | http://localhost:5080/health/ready | Postgres, Redis, Kafka
 | Worker health    | http://localhost:5081/health/ready |
-| Redpanda Console | http://localhost:8085          | Browse topics and messages
-| Mailpit          | http://localhost:8025          | Every outbound email
-| Postgres         | localhost:5432                 |
-| Redis            | localhost:6379                 |
-| Kafka            | localhost:19092                | External listener for host tools
+| Redpanda Console | http://localhost:8085              | Browse topics and messages
+| Mailpit          | http://localhost:8025              | Every outbound email
+| Postgres         | localhost:5432                     |
+| Redis            | localhost:6379                     |
+| Kafka            | localhost:19092                    | External listener for host tools
 |===
 
 Change any port in `.env` if it collides with something you already run.
@@ -184,8 +338,8 @@ curl -s -X POST $API/api/v1/users/invitations \
   -d '{"email":"ada@example.com","fullName":"Ada Lovelace","roles":["member"]}' | jq
 ----
 
-Open http://localhost:8025 - the invitation is there, with a working "Accept your invitation"
-button. Follow it, or extract the token and accept over the API:
+Open http://localhost:8025 — the invitation is there with a working "Accept your invitation"
+button. Follow it, or accept over the API:
 
 [source,bash]
 ----
@@ -194,20 +348,20 @@ curl -s -X POST $API/api/v1/auth/invitations/accept \
   -d '{"token":"<token>","password":"analytical-engine-1843","fullName":"Ada King"}' | jq
 ----
 
-While that happens you can watch `<prefix>.user.invited` and `<prefix>.email.requested` fill up in
+While that runs you can watch `<prefix>.user.invited` and `<prefix>.email.requested` fill up in
 Redpanda Console.
 
 === Everyday commands
 
 [source,bash]
 ----
-docker compose logs -f api worker      # follow
-docker compose restart api             # restart one service
+docker compose logs -f api worker                      # follow
+docker compose restart api                             # restart one service
 docker compose build api && docker compose up -d api   # rebuild after a code change
 docker compose run --rm migrator                       # re-run all bootstrap steps
 docker compose run --rm migrator kafka-topics          # re-run one step
-docker compose down                    # stop, keep data
-docker compose down -v                 # stop and delete volumes (full reset)
+docker compose down                                    # stop, keep data
+docker compose down -v                                 # stop and delete volumes (full reset)
 ----
 
 == Run without Docker
@@ -220,7 +374,7 @@ run on the host.
 docker compose up -d postgres redis redpanda mailpit
 ----
 
-Point `.env` at localhost - container hostnames do not resolve from the host:
+Point `.env` at localhost — container hostnames do not resolve from the host:
 
 [source,ini]
 ----
@@ -236,13 +390,12 @@ Then, in three terminals:
 
 [source,bash]
 ----
-dotnet run --project src/CleanArchTemplate.Migrator     # once
-dotnet run --project src/CleanArchTemplate.Api
-dotnet run --project src/CleanArchTemplate.Worker
+dotnet run --project src/Acme.Billing.Migrator     # once
+dotnet run --project src/Acme.Billing.Api
+dotnet run --project src/Acme.Billing.Worker
 ----
 
-The API is on http://localhost:5080 with the reference at `/scalar/v1`. `dotnet watch` works
-normally.
+`dotnet watch` works normally.
 
 [NOTE]
 ====
@@ -253,28 +406,26 @@ variables, so both paths behave identically.
 
 == Database migrations
 
-Migrations live in `Infrastructure/Persistence/Migrations`; `Migrator` is the startup project.
-The `dotnet-ef` tool is pinned in `.config/dotnet-tools.json`:
+Migrations live in `Infrastructure/Persistence/Migrations`; `Migrator` is the startup project. The
+`dotnet-ef` tool is pinned in `.config/dotnet-tools.json`:
 
 [source,bash]
 ----
 dotnet tool restore
 
 dotnet dotnet-ef migrations add AddSomething \
-  --project src/CleanArchTemplate.Infrastructure \
-  --startup-project src/CleanArchTemplate.Migrator \
+  --project src/Acme.Billing.Infrastructure \
+  --startup-project src/Acme.Billing.Migrator \
   --output-dir Persistence/Migrations
 ----
 
-The design-time factory reads `DATABASE__CONNECTIONSTRING` or `ConnectionStrings__Default`, and
+The design-time factory reads `DATABASE__CONNECTIONSTRING` or `ConnectionStrings__Default` and
 falls back to a local default, so adding a migration never needs the full host to start.
 
-Apply them by running the migrator - never from API startup, where several replicas would race:
+Apply them by running the migrator — never from API startup, where several replicas would race:
 
 [source,bash]
 ----
-dotnet run --project src/CleanArchTemplate.Migrator
-# or
 docker compose run --rm migrator
 ----
 
@@ -283,30 +434,49 @@ To undo the most recent, unapplied migration:
 [source,bash]
 ----
 dotnet dotnet-ef migrations remove \
-  --project src/CleanArchTemplate.Infrastructure \
-  --startup-project src/CleanArchTemplate.Migrator
+  --project src/Acme.Billing.Infrastructure \
+  --startup-project src/Acme.Billing.Migrator
 ----
 
 == Tests
 
 [source,bash]
 ----
-dotnet test CleanArchTemplate.slnx                          # everything
-dotnet test tests/CleanArchTemplate.Domain.UnitTests        # no Docker needed
-dotnet test tests/CleanArchTemplate.Application.UnitTests   # no Docker needed
-dotnet test tests/CleanArchTemplate.Api.IntegrationTests    # needs Docker
+dotnet test Acme.Billing.slnx                            # everything
+dotnet test tests/Acme.Billing.Domain.UnitTests           # no Docker needed
+dotnet test tests/Acme.Billing.Application.UnitTests      # no Docker needed
+dotnet test tests/Acme.Billing.Api.IntegrationTests       # needs Docker
 ----
 
-The integration tests start their own PostgreSQL, Redis and Redpanda containers via
-Testcontainers, independent of the Compose stack - you can run both at once. If Docker is not
-available they *skip* rather than fail.
+The integration tests start their own PostgreSQL, Redis and Redpanda containers via Testcontainers,
+independent of the Compose stack — you can run both at once. If Docker is unavailable they *skip*
+rather than fail.
 
 With coverage:
 
 [source,bash]
 ----
-dotnet test CleanArchTemplate.slnx --collect:"XPlat Code Coverage"
+dotnet test Acme.Billing.slnx --collect:"XPlat Code Coverage"
 ----
+
+== Update or remove the CLI
+
+[source,bash]
+----
+cd ~/.dotnet-api-template/src && git pull && ./scripts/install.sh   # update
+dotnet-api-template update                                          # re-register the template only
+./scripts/uninstall.sh                                              # remove everything
+----
+
+On Windows, re-run `.\scripts\install.ps1` to update, and to remove:
+
+[source,powershell]
+----
+dotnet-api-template uninstall-template
+dotnet tool uninstall --global DotnetApiTemplate.Cli
+----
+
+Updating the CLI does not touch projects you have already generated.
 
 == Troubleshooting
 
@@ -314,15 +484,32 @@ dotnet test CleanArchTemplate.slnx --collect:"XPlat Code Coverage"
 |===
 | Symptom | Cause and fix
 
+| `dotnet-api-template: command not found`
+| `~/.dotnet/tools` is not on your `PATH`. See <<Confirm the install>>.
+
+| `The bundled template is missing`
+| The tool was installed without its payload. Re-run the install script.
+
+| `No templates found matching: 'cleanapi'`
+| The SDK's template cache and the tool disagree. `dotnet-api-template update` re-registers it.
+
+| The CLI generates an older version of the template
+| The tool bundles the template, so the template only changes when the tool is reinstalled. Pull
+  and re-run `./scripts/install.sh`.
+
+| `'<segment>' is a C# keyword`
+| Project names become namespaces. Pick a name whose dotted segments are all valid C# identifiers.
+
 | `dependency failed to start: container … is unhealthy`
-| A dependency did not pass its health check. `docker compose logs <service>` names the reason.
+| A dependency failed its health check. `docker compose logs <service>` names the reason.
 
 | Migrator exits non-zero with a connection error
 | Postgres was not ready. It retries for `MIGRATOR__STARTUPTIMEOUTSECONDS`; raise it on a slow
   machine, or check `POSTGRES_PASSWORD` matches the password inside `DATABASE__CONNECTIONSTRING`.
 
 | API starts, every request returns 500 mentioning `SymmetricSecurityKey`
-| `JWT__SIGNINGKEY` is empty or shorter than 32 characters.
+| `JWT__SIGNINGKEY` is empty or shorter than 32 characters. The CLI generates one; check you did
+  not pass `--no-env` and then skip the manual step.
 
 | `Kafka topics are missing` in the worker log
 | The migrator has not run, or `KAFKA__TOPICPREFIX` differs between services. Run
@@ -335,8 +522,8 @@ dotnet test CleanArchTemplate.slnx --collect:"XPlat Code Coverage"
 | No email in Mailpit
 | Check the outbox: `docker compose exec postgres psql -U appuser -d appdb -c
   "select topic, processed_at, last_error from outbox_messages order by occurred_at desc limit 5;"`.
-  A null `processed_at` with a `last_error` means the publish is failing; a published row with no
-  email means the consumer is failing - see `docker compose logs worker`.
+  A null `processed_at` with a `last_error` means publishing is failing; a published row with no
+  email means the consumer is — see `docker compose logs worker`.
 
 | Login always returns 401 with correct credentials
 | The account may not be `Active`, or `SECURITY__MAXFAILEDLOGINATTEMPTS` has been hit. The lockout
@@ -348,23 +535,8 @@ dotnet test CleanArchTemplate.slnx --collect:"XPlat Code Coverage"
   invalidate existing access tokens. Refresh or sign in again.
 
 | Port already allocated
-| Change the `*_PORT` value in `.env` and `docker compose up -d` again.
+| Change the `*_PORT` value in `.env`, or generate with a different `--api-port`.
 
 | Integration tests fail with a Docker socket error
 | Docker Desktop is not running. Start it, or run only the unit test projects.
-
-| Build fails on `protoc` inside Docker
-| Only relevant if you switched the build stage to an Alpine SDK. `Grpc.Tools` ships a
-  glibc-linked `protoc` with no musl build; keep the Debian SDK stage.
-
-| Everything is confusing and you want a clean slate
-| `docker compose down -v && docker compose up -d --build`
 |===
-
-== Uninstall
-
-[source,bash]
-----
-docker compose down -v                 # containers, network and volumes
-docker image rm cleanarch-api cleanarch-worker cleanarch-migrator
-----
