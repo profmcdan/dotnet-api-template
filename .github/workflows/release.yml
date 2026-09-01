@@ -232,10 +232,13 @@ jobs:
             exit 1
           fi
 
+      # Runs for any real publish, not just tag pushes, so releasing via workflow_dispatch still
+      # produces a GitHub release. tag_name is explicit because a dispatched run has no tag ref.
       - name: Create the GitHub release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || inputs.dry_run == false
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
           files: artifacts/*
           generate_release_notes: true
           body: |
