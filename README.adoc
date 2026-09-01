@@ -326,8 +326,12 @@ anywhere. Two things to set up before your first tag:
   file, and `production` as the environment — matching the `publish` job;
 * a repository variable `NUGET_USER` holding your nuget.org profile name.
 
-The workflow checks both in its first step and publishes nothing without them. Rehearse with the
-`workflow_dispatch` trigger and `dry_run: true`.
+The workflow checks both in its first step and publishes nothing without them.
+
+Rehearse with the `workflow_dispatch` trigger and `dry_run: true` — it runs everything except the
+push, including the OIDC exchange, so it proves the policy works without cutting a tag. Do that
+before your first tag: a tag-triggered run is frozen against the tagged commit, so later fixes
+need the tag re-cutting.
 
 Bump with the script rather than by hand — the workflow refuses to publish when the tag and the
 checked-in version disagree.

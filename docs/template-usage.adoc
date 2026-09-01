@@ -368,27 +368,23 @@ email address. Settings → Secrets and variables → Actions → *Variables*.
 It is an identifier rather than a credential, which is why it is a variable. The workflow also
 accepts it as a secret if you prefer, which is what the Microsoft documentation suggests.
 
-==== 3. Rehearse it
+==== 3. Rehearse it — this validates the policy
 
-Run the workflow from the Actions tab with `workflow_dispatch` and `dry_run: true`. That tests,
-packs, installs the packed tool and scaffolds a project with it, then uploads the packages as
-build artifacts *without* touching nuget.org.
+Run the workflow from the Actions tab: *Run workflow* → pick your branch → `dry_run: true`.
 
-[CAUTION]
+It does everything a real release does *except the push*, including exchanging the OIDC token for
+a short-lived key. If that step is green, your policy is correct.
+
+This is the fast way to get Trusted Publishing working. `workflow_dispatch` runs the workflow file
+from whichever branch you select, so you can fix a policy field or a workflow line, re-run, and
+know within a minute — no tags, no releases, nothing published.
+
+[IMPORTANT]
 ====
-A dry run skips the token exchange, so it does not prove the policy is right. The first real
-release is what validates that — which is why the preflight step and the failure summaries exist.
+Get a green dry run *before* cutting a tag. A tag-triggered run uses the workflow file frozen
+inside the tagged commit, so every fix after that point needs the tag deleting and re-cutting —
+see <<Fixing a failed release>>.
 ====
-
-==== Private repositories: the seven-day window
-
-A policy for a private repository starts *temporarily active* for seven days. nuget.org needs the
-numeric GitHub repository and owner ids to pin the policy, and it only receives those from a real
-publish — that is what stops someone deleting a repository, recreating it under the same name and
-inheriting your publishing rights.
-
-Publish once inside that window and the policy becomes permanently active. Miss it and the policy
-goes inactive; you can restart the window from the UI at any time.
 
 ==== About the environment
 

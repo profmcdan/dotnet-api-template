@@ -64,7 +64,6 @@ jobs:
       # Checked first so a misconfiguration costs seconds rather than a full test-pack-smoke
       # cycle. There is no API key to check any more - only who we publish as.
       - name: Check the publisher identity
-        if: github.event_name == 'push' || inputs.dry_run == false
         env:
           NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
         run: |
@@ -184,12 +183,28 @@ jobs:
 
       # Immediately before the push: the key nuget.org issues is valid for one hour, and the
       # OIDC token behind it can be exchanged exactly once.
+      #
+      # This runs on dry runs too. The exchange is the part most likely to be misconfigured -
+      # policy fields, environment, username - and exchanging without pushing is harmless. It
+      # means `workflow_dispatch` with dry_run validates the policy from any branch, in seconds,
+      # without cutting a tag.
       - name: Exchange the OIDC token for a short-lived nuget.org key
         id: nuget-login
-        if: github.event_name == 'push' || inputs.dry_run == false
         uses: NuGet/login@v1
         with:
           user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+
+      - name: Report the dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: |
+          {
+            echo "### Dry run complete"
+            echo ""
+            echo "Trusted Publishing is configured correctly - the policy matched and nuget.org"
+            echo "issued a short-lived key. Nothing was pushed."
+            echo ""
+            echo "The packages are attached to this run as build artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Push to nuget.org
         if: github.event_name == 'push' || inputs.dry_run == false
