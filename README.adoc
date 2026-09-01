@@ -322,7 +322,8 @@ Publishing uses nuget.org *Trusted Publishing* — GitHub mints a short-lived si
 nuget.org exchanges it for a key that expires in an hour, and no long-lived credential is stored
 anywhere. Two things to set up before your first tag:
 
-* a Trusted Publishing policy on nuget.org naming this repository and `release.yml`;
+* a Trusted Publishing policy on nuget.org naming this repository, `release.yml` as the workflow
+  file, and `production` as the environment — matching the `publish` job;
 * a repository variable `NUGET_USER` holding your nuget.org profile name.
 
 The workflow checks both in its first step and publishes nothing without them. Rehearse with the

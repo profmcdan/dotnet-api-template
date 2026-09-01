@@ -348,7 +348,7 @@ Sign in, click your username, choose *Trusted Publishing*, and add a policy:
 | Repository Owner | `profmcdan`
 | Repository       | `dotnet-api-template`
 | Workflow File    | `release.yml` — the *file name only*, not `.github/workflows/release.yml`
-| Environment      | Leave empty, unless you add a GitHub environment (see below)
+| Environment      | `production` — must match the `environment:` on the workflow's `publish` job
 |===
 
 The policy is scoped to the *owner*, not to a package, so it covers ids that do not exist yet —
@@ -390,11 +390,34 @@ inheriting your publishing rights.
 Publish once inside that window and the policy becomes permanently active. Miss it and the policy
 goes inactive; you can restart the window from the UI at any time.
 
-==== Optional: gate releases behind an environment
+==== About the environment
 
-For tighter control, add `environment: release` to the `publish` job, create that environment in
-Settings → Environments with required reviewers, and set *Environment* to `release` on the
-nuget.org policy. A release then needs a human approval before the token is ever minted.
+The `publish` job declares `environment: production`, and the policy's *Environment* field must
+say the same thing. GitHub puts the environment name into the OIDC token; nuget.org compares it
+against the policy and refuses the exchange when they differ — including when the policy names one
+and the job declares none.
+
+A policy with an empty *Environment* field does not check the claim at all. The combinations
+behave like this:
+
+[cols="2,2,3", options="header"]
+|===
+| Policy Environment | Job `environment:` | Result
+
+| `production` | `production` | Matches. What this repository ships.
+| _(empty)_    | anything or nothing | Not validated.
+| `production` | _(none)_     | *Rejected* — "expected 'production', actual ''".
+| _(empty)_    | `production` | Fine, but you lose the extra restriction.
+|===
+
+Using an environment is worth keeping. Under Settings → Environments you can add required
+reviewers to `production`, so a release waits for a human before the token is ever minted, and
+the policy only trusts runs that went through that gate. GitHub creates the environment on first
+use if it does not exist, so nothing breaks if you have not made it yet — but note that once you
+do add protection rules, the whole job waits for approval before anything runs.
+
+If you would rather not use one, clear *Environment* on the nuget.org policy **and** delete the
+`environment: production` line from the job. Changing only one side breaks the exchange.
 
 ==== If Trusted Publishing is not available yet
 
@@ -624,10 +647,14 @@ Without it NuGet silently drops `.template.config/`, `.gitignore`, `.editorconfi
 | No *Trusted Publishing* option in the nuget.org account menu
 | Still rolling out. Use <<If Trusted Publishing is not available yet>> in the meantime.
 
-| The `NuGet/login` step fails to exchange the token
-| The token did not match a policy. Every field is compared: Repository Owner, Repository, and
+| `Token exchange failed (HTTP 401) … Environment mismatch … expected 'X', actual ''`
+| The policy names an environment but the job does not declare one. Add `environment: X` to the
+  `publish` job, or clear the field on the policy. See <<About the environment>>.
+
+| `Token exchange failed (HTTP 401)` with no environment mentioned
+| Some other field did not match. Every one is compared: Repository Owner, Repository, and
   Workflow File — which is `release.yml`, the file name alone, with no `.github/workflows/`
-  prefix. If the policy sets an Environment, the job must declare the same one.
+  prefix. The `user` input must be the nuget.org profile name of the *policy creator*.
 
 | `Unable to get ACTIONS_ID_TOKEN_REQUEST_URL`
 | The job cannot mint an OIDC token. `permissions: id-token: write` must be present, and a

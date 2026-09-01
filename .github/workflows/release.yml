@@ -12,7 +12,7 @@ name: release
 #        Repository Owner  profmcdan
 #        Repository        dotnet-api-template
 #        Workflow File     release.yml          <- file name only, no path
-#        Environment       (leave empty unless you add one below)
+#        Environment       production           <- must match the job's `environment:` below
 #   2. A repository variable NUGET_USER holding your nuget.org profile name (not your email).
 #      Settings -> Secrets and variables -> Actions -> Variables.
 #
@@ -50,6 +50,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    # Must match the Environment field on the nuget.org Trusted Publishing policy. GitHub puts
+    # this in the OIDC token's `environment` claim; nuget.org rejects the exchange if the policy
+    # names an environment and the claim is empty or different.
+    #
+    # A policy with an empty Environment field does not validate the claim at all, so declaring
+    # one here is safe either way - and it lets you add required reviewers under
+    # Settings -> Environments to gate a release on human approval.
+    environment: production
 
     steps:
       # Checked first so a misconfiguration costs seconds rather than a full test-pack-smoke
