@@ -9,7 +9,9 @@
     They ship together and share one version number, so a given version of the tool and of the
     template package always scaffold identical projects.
 
-    Bump <Version> here, tag the commit `v<version>`, and the release workflow does the rest.
+    Use scripts/release.sh to bump the Version property below, commit and tag in one step;
+    pushing that tag is what publishes. Avoid writing the element name in prose here - a
+    naive parser reading this file will match the first occurrence it finds.
   -->
 
   <PropertyGroup>

@@ -344,22 +344,35 @@ https://learn.microsoft.com/nuget/nuget-org/id-prefix-reservation[ID prefix rese
 
 === Releasing
 
-The `release` workflow does the whole thing on a tag:
+One command bumps the version, runs the tests, commits and tags:
 
 [source,bash]
 ----
-# 1. bump the version in Directory.Packaging.props
-#    <Version>1.1.0</Version>
-
-git commit -am "chore: release 1.1.0"
-git tag v1.1.0
-git push origin main --tags
+./scripts/release.sh 1.1.0
 ----
 
-That triggers `.github/workflows/release.yml`, which:
+It refuses to run on a dirty tree or an existing tag, and it does *not* push — publishing to
+nuget.org is permanent, so review first:
 
-. Checks the tag matches `<Version>` in `Directory.Packaging.props`, and fails if they disagree —
-  otherwise a locally built tool would report a version that never existed.
+[source,bash]
+----
+git show --stat HEAD
+git push origin HEAD --follow-tags
+----
+
+Add `--push` to do both in one step once you trust it.
+
+[IMPORTANT]
+====
+Bump the version with the script rather than by hand. The release workflow refuses to publish when
+the tag and the checked-in version disagree, and doing it in three manual steps is exactly how they
+come to disagree.
+====
+
+Pushing the tag triggers `.github/workflows/release.yml`, which:
+
+. Checks the tag matches the version the projects actually evaluate to — read from MSBuild, not
+  scraped out of the XML, so a `Version` mentioned in a comment cannot fool it.
 . Runs the full test suite, application and tooling.
 . Packs both packages with the version from the tag.
 . *Installs the packed tool and scaffolds a project with it*, so a broken package cannot reach
@@ -367,14 +380,35 @@ That triggers `.github/workflows/release.yml`, which:
 . Pushes to nuget.org with `--skip-duplicate`.
 . Opens a GitHub release with the packages attached and install instructions in the body.
 
-Use the `workflow_dispatch` trigger with `dry_run: true` to pack, test and upload the artifacts
-without pushing — worth doing once before your first real release.
+==== From Windows, or without the script
 
-[NOTE]
-====
-nuget.org takes a few minutes to index a new package. `dotnet tool install` may not find it
-immediately after the workflow goes green.
-====
+The `workflow_dispatch` trigger runs the same job from the GitHub Actions UI, with a `dry_run`
+option that packs and uploads the artifacts without pushing to nuget.org. Worth using once before
+your first real release.
+
+By hand, the sequence is:
+
+[source,bash]
+----
+# 1. edit the Version property in Directory.Packaging.props
+git commit -am "chore: release 1.1.0"
+git tag -a v1.1.0 -m "Release 1.1.0"
+git push origin HEAD --follow-tags
+----
+
+==== Recovering from a mismatched tag
+
+If the workflow fails with a version mismatch, the tag was pushed without the matching bump.
+Delete it and cut the release properly — nothing was published, so this is safe:
+
+[source,bash]
+----
+git tag -d v1.1.0
+git push --delete origin v1.1.0
+
+./scripts/release.sh 1.1.0
+git push origin HEAD --follow-tags
+----
 
 === Publishing by hand
 
@@ -478,8 +512,8 @@ Without it NuGet silently drops `.template.config/`, `.gitignore`, `.editorconfi
   `Directory.Packaging.props`.
 
 | The release workflow fails on the version check
-| The tag and `<Version>` in `Directory.Packaging.props` disagree. Bump the file, commit, delete
-  the tag (`git tag -d v1.1.0 && git push --delete origin v1.1.0`) and re-tag.
+| The tag was pushed without the matching version bump. See
+  <<Recovering from a mismatched tag>>. Using `./scripts/release.sh` avoids it entirely.
 
 | `dotnet nuget push` returns 403
 | The API key is missing, expired, or its glob pattern does not cover the package ID. Keys are

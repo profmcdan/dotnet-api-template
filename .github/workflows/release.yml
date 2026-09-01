@@ -60,17 +60,42 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Publishing $VERSION"
 
-      # A tag that disagrees with the checked-in version means locally built tools would report
-      # the wrong version. Catch it here rather than after it is on nuget.org forever.
-      - name: Check the tag matches Directory.Packaging.props
+      # A tag that disagrees with the checked-in version means anyone building from source gets
+      # a tool that reports a version which was never published. Catch it here rather than after
+      # it is on nuget.org forever.
+      #
+      # The value comes from MSBuild rather than from grepping the XML: MSBuild evaluates the
+      # real property through the whole import chain, so it cannot be fooled by a <Version> that
+      # happens to appear inside a comment.
+      - name: Check the tag matches the checked-in version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          DECLARED=$(grep -oP '(?<=<Version>)[^<]+' Directory.Packaging.props | head -1)
+          DECLARED=$(dotnet msbuild tools/DotnetApiTemplate.Cli/DotnetApiTemplate.Cli.csproj \
+                       -getProperty:Version -nologo | tr -d '[:space:]')
 
-          if [ "$VERSION" != "$DECLARED" ]; then
-            echo "::error::Tag says $VERSION but Directory.Packaging.props says $DECLARED. Bump the file and re-tag."
+          if [ -z "$DECLARED" ]; then
+            echo "::error::Could not read the Version property from the project."
             exit 1
           fi
+
+          if [ "$VERSION" != "$DECLARED" ]; then
+            echo "::error::Tag v$VERSION does not match Directory.Packaging.props ($DECLARED)."
+            {
+              echo "### Version mismatch"
+              echo ""
+              echo "The tag says \`$VERSION\`; \`Directory.Packaging.props\` says \`$DECLARED\`."
+              echo ""
+              echo "Fix it with:"
+              echo ""
+              echo '```bash'
+              echo "git tag -d v$VERSION && git push --delete origin v$VERSION"
+              echo "./scripts/release.sh $VERSION"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "Version $VERSION matches the repository."
 
       - name: Test
         run: |

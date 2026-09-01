@@ -195,7 +195,7 @@ tools/                              published as ProfmcdanDotnetApiTemplate.* on
   DotnetApiTemplate.Cli.UnitTests   name validation, .env rewriting and argument parsing
   DotnetApiTemplate.Templates       the same template as a plain `dotnet new` package
 
-scripts/                            install.sh, install.ps1, uninstall.sh
+scripts/                            install.sh, install.ps1, uninstall.sh, release.sh
 .github/workflows/                  ci.yml (build, test, scaffold) and release.yml (publish on a tag)
 docs/                               architecture, design and installation documentation
 Dockerfile                          multi-stage, non-root, one file for all three services
@@ -308,19 +308,21 @@ docker compose down -v
 
 == Releasing this template
 
-Bump `<Version>` in `Directory.Packaging.props`, tag the commit, and push:
-
 [source,bash]
 ----
-git commit -am "chore: release 1.1.0" && git tag v1.1.0 && git push origin main --tags
+./scripts/release.sh 1.1.0        # bump, test, commit, tag
+git push origin HEAD --follow-tags
 ----
 
-`.github/workflows/release.yml` runs the tests, packs both packages, installs the packed tool and
-scaffolds a project with it, then pushes to nuget.org and opens a GitHub release. It needs one
-repository secret, `NUGET_API_KEY`.
+Pushing the tag runs `.github/workflows/release.yml`, which tests, packs both packages, installs
+the packed tool and scaffolds a project with it, then pushes to nuget.org and opens a GitHub
+release. It needs one repository secret, `NUGET_API_KEY`.
 
-Full details, including publishing by hand and to a private feed, are in
-link:docs/template-usage.adoc#_publishing_to_nuget[template usage].
+Bump with the script rather than by hand — the workflow refuses to publish when the tag and the
+checked-in version disagree.
+
+Full details, including publishing by hand, releasing from Windows and recovering from a
+mismatched tag, are in link:docs/template-usage.adoc#_publishing_to_nuget[template usage].
 
 == Before you ship
 
