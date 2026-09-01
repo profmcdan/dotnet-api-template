@@ -15,7 +15,7 @@
   -->
 
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
 
     <!--
       Owner-prefixed so the ids are unambiguously ours on nuget.org, where ids are global,
