@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CleanArchTemplate.Domain.UnitTests</RootNamespace>
+    <AssemblyName>CleanArchTemplate.Domain.UnitTests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CleanArchTemplate.Domain\CleanArchTemplate.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

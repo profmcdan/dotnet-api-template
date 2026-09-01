@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json.schemastore.org/ide.host",
+  "order": 0,
+  "symbolInfo": [
+    {
+      "id": "AllowGrpc",
+      "name": {
+        "text": "Enable gRPC"
+      },
+      "isVisible": true
+    },
+    {
+      "id": "KafkaTopicPrefix",
+      "name": {
+        "text": "Kafka topic prefix"
+      },
+      "isVisible": true
+    },
+    {
+      "id": "ApiPort",
+      "name": {
+        "text": "API host port"
+      },
+      "isVisible": true
+    },
+    {
+      "id": "DatabaseName",
+      "name": {
+        "text": "Database name"
+      },
+      "isVisible": true
+    },
+    {
+      "id": "IncludeTests",
+      "name": {
+        "text": "Include tests"
+      },
+      "isVisible": true
+    },
+    {
+      "id": "IncludeDocs",
+      "name": {
+        "text": "Include documentation"
+      },
+      "isVisible": true
+    }
+  ]
+}

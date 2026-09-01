@@ -1,0 +1,11 @@
+# EF Core writes these files; holding generated code to the hand-written style rules only
+# creates churn every time a migration is added.
+[*.cs]
+generated_code = true
+
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.IDE0065.severity = none
+dotnet_diagnostic.IDE0055.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1707.severity = none

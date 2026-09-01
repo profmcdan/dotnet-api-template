@@ -1,0 +1,8 @@
+Hi {{FullName}},
+
+Access to your {{AppName}} account has been suspended and any active sessions
+have been signed out.
+
+Reason given: {{Reason}}
+
+If you think this is a mistake, contact your administrator or support.

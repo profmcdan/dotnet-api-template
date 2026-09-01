@@ -1,0 +1,66 @@
+## .NET
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Bb]uild[Ll]og.*
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.userprefs
+project.lock.json
+project.fragment.lock.json
+artifacts/
+.vs/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.DS_Store
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+TestResults/
+
+## Publish
+publish/
+*.publishsettings
+PublishScripts/
+
+## NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+## Secrets & local config
+.env
+.env.*
+!.env.sample
+*.pfx
+*.p12
+secrets.json
+appsettings.Local.json
+appsettings.*.Local.json
+
+## Docker / local volumes
+.data/
+docker-volumes/
+
+## Docs build output
+docs/_output/
+docs/**/*.html
+docs/**/*.pdf

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json.schemastore.org/dotnetcli.host",
+  "symbolInfo": {
+    "AllowGrpc": {
+      "longName": "allow-grpc",
+      "shortName": "g"
+    },
+    "KafkaTopicPrefix": {
+      "longName": "kafka-topic-prefix",
+      "shortName": "k"
+    },
+    "ApiPort": {
+      "longName": "api-port",
+      "shortName": "p"
+    },
+    "DatabaseName": {
+      "longName": "database-name",
+      "shortName": "d"
+    },
+    "IncludeTests": {
+      "longName": "include-tests",
+      "shortName": "t"
+    },
+    "IncludeDocs": {
+      "longName": "include-docs",
+      "shortName": ""
+    },
+    "SkipRestore": {
+      "longName": "skip-restore",
+      "shortName": ""
+    }
+  }
+}

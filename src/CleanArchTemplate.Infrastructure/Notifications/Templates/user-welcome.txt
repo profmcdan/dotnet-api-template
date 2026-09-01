@@ -1,0 +1,5 @@
+Hi {{FullName}},
+
+Your {{AppName}} account is now active. You can sign in any time with {{Email}}.
+
+For your security, we will never ask for your password by email.

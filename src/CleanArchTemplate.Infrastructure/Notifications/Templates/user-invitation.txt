@@ -1,0 +1,10 @@
+Hi {{FullName}},
+
+{{InvitedByName}} has invited you to join {{AppName}}. Accept the invitation to
+choose a password and finish setting up your account.
+
+This invitation was sent to {{Email}} and expires on {{ExpiresAt}}.
+It is personal to you and can only be used once.
+
+If you were not expecting this, you can safely ignore this email - the
+invitation will expire on its own.

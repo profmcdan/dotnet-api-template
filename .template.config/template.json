@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "CleanArchTemplate",
+  "classifications": [
+    "Web",
+    "WebAPI",
+    "Clean Architecture",
+    "DDD",
+    "CQRS",
+    "Kafka",
+    "Postgres",
+    "Redis",
+    "Docker"
+  ],
+  "identity": "CleanArchTemplate.WebApi.CSharp",
+  "name": "Clean Architecture Web API (Postgres, Kafka, Redis)",
+  "shortName": "cleanapi",
+  "description": "An ASP.NET Core Web API laid out as clean architecture: JWT user management with an invite-by-email flow over Kafka, a transactional outbox, EF Core on PostgreSQL, Redis, a migrator job, background workers and a full Docker Compose stack.",
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "sourceName": "CleanArchTemplate",
+  "preferNameDirectory": true,
+  "defaultName": "MyService",
+  "symbols": {
+    "AllowGrpc": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "false",
+      "displayName": "Enable gRPC",
+      "description": "Adds a gRPC surface alongside REST, sharing the same query handlers, plus server reflection in Development."
+    },
+    "KafkaTopicPrefix": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "cleanarch",
+      "replaces": "cleanarch",
+      "fileRename": "cleanarch",
+      "displayName": "Kafka topic prefix",
+      "description": "Prepended to every topic name so several environments or tenants can share one broker. Also used as the Redis key namespace and the consumer group prefix."
+    },
+    "ApiPort": {
+      "type": "parameter",
+      "datatype": "int",
+      "defaultValue": "5080",
+      "replaces": "5080",
+      "displayName": "API host port",
+      "description": "Host port the API is published on by Docker Compose."
+    },
+    "DatabaseName": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "appdb",
+      "replaces": "appdb",
+      "displayName": "Database name",
+      "description": "PostgreSQL database name used by Compose and the default connection strings."
+    },
+    "IncludeTests": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "displayName": "Include tests",
+      "description": "Include the unit and Testcontainers-backed integration test projects."
+    },
+    "IncludeDocs": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "true",
+      "displayName": "Include docs",
+      "description": "Include the AsciiDoc architecture, design and installation documentation."
+    },
+    "SkipRestore": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "false",
+      "displayName": "Skip restore",
+      "description": "Skip the automatic 'dotnet restore' after the project is created."
+    }
+  },
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "condition": "(!AllowGrpc)",
+          "exclude": [
+            "src/CleanArchTemplate.Api/Grpc/**",
+            "src/CleanArchTemplate.Api/Protos/**"
+          ]
+        },
+        {
+          "condition": "(!IncludeTests)",
+          "exclude": [
+            "tests/**"
+          ]
+        },
+        {
+          "condition": "(!IncludeDocs)",
+          "exclude": [
+            "docs/**"
+          ]
+        }
+      ],
+      "exclude": [
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/.git/**",
+        "**/.vs/**",
+        "**/.idea/**",
+        "**/*.user",
+        "**/*.lock.json",
+        "**/node_modules/**",
+        ".env",
+        ".data/**",
+        ".tools/**",
+        "**/TestResults/**",
+        ".template.config/**"
+      ]
+    }
+  ],
+  "primaryOutputs": [
+    {
+      "path": "CleanArchTemplate.slnx"
+    },
+    {
+      "path": "src/CleanArchTemplate.Api/CleanArchTemplate.Api.csproj"
+    }
+  ],
+  "postActions": [
+    {
+      "id": "restore",
+      "condition": "(!SkipRestore)",
+      "description": "Restore NuGet packages",
+      "manualInstructions": [
+        {
+          "text": "Run 'dotnet restore'"
+        }
+      ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ],
+  "guids": []
+}

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>CleanArchTemplate.Api</RootNamespace>
+    <AssemblyName>CleanArchTemplate.Api</AssemblyName>
+    <UserSecretsId>cleanarchtemplate-api</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CleanArchTemplate.Application\CleanArchTemplate.Application.csproj" />
+    <ProjectReference Include="..\CleanArchTemplate.Infrastructure\CleanArchTemplate.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Enrichers.Environment" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" />
+    <PackageReference Include="AspNetCore.HealthChecks.Kafka" />
+    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
+  </ItemGroup>
+
+  <!--#if (AllowGrpc) -->
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\*.proto" GrpcServices="Server" />
+  </ItemGroup>
+  <!--#endif -->
+
+</Project>

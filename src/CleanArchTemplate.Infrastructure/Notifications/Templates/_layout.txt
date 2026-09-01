@@ -1,0 +1,11 @@
+{{AppName}}
+================================================================
+
+{{Content}}
+{{#ActionUrl}}
+{{ActionLabel}}: {{ActionUrl}}
+{{/ActionUrl}}
+
+----------------------------------------------------------------
+Sent by {{AppName}}. Need help? {{SupportUrl}}
+This is an automated message; replies are not monitored.

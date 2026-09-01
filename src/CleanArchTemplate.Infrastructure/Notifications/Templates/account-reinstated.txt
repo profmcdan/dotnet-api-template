@@ -1,0 +1,7 @@
+Hi {{FullName}},
+
+Your {{AppName}} account has been restored and you can sign in again with
+{{Email}}.
+
+You will need to sign in again, because suspending an account ends all of its
+sessions.

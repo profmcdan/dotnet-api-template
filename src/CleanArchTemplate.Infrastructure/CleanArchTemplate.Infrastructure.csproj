@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CleanArchTemplate.Infrastructure</RootNamespace>
+    <AssemblyName>CleanArchTemplate.Infrastructure</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CleanArchTemplate.Application\CleanArchTemplate.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
+    <PackageReference Include="BCrypt.Net-Next" />
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Templates are embedded so the email worker image needs no extra content layer. -->
+    <EmbeddedResource Include="Notifications\Templates\**\*.html" />
+    <EmbeddedResource Include="Notifications\Templates\**\*.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CleanArchTemplate.Api.IntegrationTests" />
+  </ItemGroup>
+
+</Project>
